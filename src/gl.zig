@@ -16,6 +16,15 @@ pub const BufferUsage = enum(c_uint) {
     DynamicRead = C.GL_DYNAMIC_READ,
     DynamicCopy = C.GL_DYNAMIC_COPY,
 };
+pub const DrawMode = enum(c_uint) {
+    Points = C.GL_POINTS,
+    LineStrip = C.GL_LINE_STRIP,
+    LineLoop = C.GL_LINE_LOOP,
+    Lines = C.GL_LINES,
+    TriangleStrip = C.GL_TRIANGLE_STRIP,
+    TriangleFan = C.GL_TRIANGLE_FAN,
+    Triangles = C.GL_TRIANGLES,
+};
 
 pub const BO = struct {
     handle: C.GLuint,
@@ -141,4 +150,74 @@ pub fn createShader(shader_type: ShaderType) !Shader {
     const result = C.glCreateShader(@enumToInt(shader_type));
     try _TestError();
     return Shader{ .handle = result };
+}
+
+pub fn vertexAttribPointer(idx: C.GLuint, comptime ptr: anytype, comptime field_name: []const u8) !void {
+    const field_type = @TypeOf(@field(ptr[0], field_name));
+    C.glVertexAttribPointer(
+        idx,
+        switch (@typeInfo(field_type).Array.len) {
+            1, 2, 3, 4 => |v| v,
+            else => {
+                @compileError("unhandled length for " ++ field_name);
+            },
+        },
+        switch (@typeInfo(field_type).Array.child) {
+            u8 => C.GL_UNSIGNED_BYTE,
+            u16 => C.GL_UNSIGNED_SHORT,
+            u32 => C.GL_UNSIGNED_INT,
+            i8 => C.GL_BYTE,
+            i16 => C.GL_SHORT,
+            i32 => C.GL_INT,
+            f32 => C.GL_FLOAT,
+            f64 => C.GL_DOUBLE,
+            else => {
+                @compileError("unhandled element type for " ++ field_name);
+            },
+        },
+        switch (@typeInfo(field_type).Array.child) {
+            u8, u16, u32, i8, i16, i32 => C.GL_TRUE,
+            f32 => C.GL_FALSE,
+            else => {
+                @compileError("unhandled normalisation for " ++ field_name);
+            },
+        },
+        @sizeOf(@TypeOf(ptr[0])),
+        &(@field(@intToPtr(*allowzero @TypeOf(ptr[0]), 0), field_name)),
+    );
+    try _TestError();
+}
+
+pub fn enableVertexAttribArray(idx: C.GLuint) !void {
+    C.glEnableVertexAttribArray(idx);
+    try _TestError();
+}
+
+pub fn disableVertexAttribArray(idx: C.GLuint) !void {
+    C.glDisableVertexAttribArray(idx);
+    try _TestError();
+}
+
+pub fn drawArrays(mode: DrawMode, first: C.GLint, count: C.GLsizei) !void {
+    C.glDrawArrays(@enumToInt(mode), first, count);
+    try _TestError();
+}
+
+pub fn clearColor(r: C.GLclampf, g: C.GLclampf, b: C.GLclampf, a: C.GLclampf) !void {
+    C.glClearColor(r, g, b, a);
+    try _TestError();
+}
+
+pub const ClearOptions = struct {
+    color: bool = false,
+    depth: bool = false,
+    stencil: bool = false,
+};
+pub fn clear(clear_options: ClearOptions) !void {
+    var clear_mask: C.GLbitfield = 0;
+    if (clear_options.color) clear_mask |= C.GL_COLOR_BUFFER_BIT;
+    if (clear_options.depth) clear_mask |= C.GL_DEPTH_BUFFER_BIT;
+    if (clear_options.stencil) clear_mask |= C.GL_STENCIL_BUFFER_BIT;
+    C.glClear(clear_mask);
+    try _TestError();
 }

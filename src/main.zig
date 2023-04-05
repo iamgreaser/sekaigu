@@ -50,8 +50,6 @@ pub fn main() !void {
     try gfx.init();
     defer gfx.free();
 
-    log.warn("GL error status at start: {}", .{C.glGetError()});
-
     // Compile the shader
     shader_prog = try gl.createProgram();
     shader_v = try gl.createShader(.Vertex);
@@ -75,58 +73,26 @@ pub fn main() !void {
         try gl.bufferData(.ArrayBuffer, @sizeOf(@TypeOf(model_va)), &model_va, .StaticDraw);
     }
 
-    log.warn("GL error status after VBO: {}", .{C.glGetError()});
-
     done: while (true) {
-        C.glClearColor(0.2, 0.0, 0.4, 0.0);
-        C.glClear(C.GL_COLOR_BUFFER_BIT);
-
+        try gl.clearColor(0.2, 0.0, 0.4, 0.0);
+        try gl.clear(.{ .color = true, .depth = true });
         {
             try gl.useProgram(shader_prog);
             defer gl.useProgram(null) catch {};
-            defer {
-                inline for (@typeInfo(@TypeOf(model_va[0])).Struct.fields, 0..) |_, i| {
-                    C.glDisableVertexAttribArray(i);
-                }
-            }
 
             try gl.bindBuffer(.ArrayBuffer, model_vbo);
             defer gl.bindBuffer(.ArrayBuffer, null) catch {};
-            inline for (@typeInfo(@TypeOf(model_va[0])).Struct.fields, 0..) |field, i| {
-                C.glVertexAttribPointer(
-                    i,
-                    switch (@typeInfo(field.type).Array.len) {
-                        1, 2, 3, 4 => |v| v,
-                        else => {
-                            @compileError("unhandled length for " ++ field.name);
-                        },
-                    },
-                    switch (@typeInfo(field.type).Array.child) {
-                        u8 => C.GL_UNSIGNED_BYTE,
-                        u16 => C.GL_UNSIGNED_SHORT,
-                        u32 => C.GL_UNSIGNED_INT,
-                        i8 => C.GL_BYTE,
-                        i16 => C.GL_SHORT,
-                        i32 => C.GL_INT,
-                        f32 => C.GL_FLOAT,
-                        f64 => C.GL_DOUBLE,
-                        else => {
-                            @compileError("unhandled element type for " ++ field.name);
-                        },
-                    },
-                    switch (@typeInfo(field.type).Array.child) {
-                        u8, u16, u32, i8, i16, i32 => C.GL_TRUE,
-                        f32 => C.GL_FALSE,
-                        else => {
-                            @compileError("unhandled normalisation for " ++ field.name);
-                        },
-                    },
-                    @sizeOf(@TypeOf(model_va[0])),
-                    &(@field(@intToPtr(*allowzero @TypeOf(model_va[0]), 0), field.name)),
-                );
-                C.glEnableVertexAttribArray(i);
+
+            defer {
+                inline for (@typeInfo(@TypeOf(model_va[0])).Struct.fields, 0..) |_, i| {
+                    gl.disableVertexAttribArray(i) catch {};
+                }
             }
-            C.glDrawArrays(C.GL_TRIANGLES, 0, 3);
+            inline for (@typeInfo(@TypeOf(model_va[0])).Struct.fields, 0..) |field, i| {
+                try gl.vertexAttribPointer(i, model_va, field.name);
+                try gl.enableVertexAttribArray(i);
+            }
+            try gl.drawArrays(.Triangles, 0, 3);
         }
 
         gfx.flip();

@@ -70,6 +70,9 @@ pub fn init(self: *Self) anyerror!void {
     } else {
         return error.GLFailed;
     }
+
+    // Clean up any latent OpenGL error
+    _ = C.glGetError();
 }
 
 pub fn free(self: *Self) void {
