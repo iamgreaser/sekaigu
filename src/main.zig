@@ -92,7 +92,7 @@ pub fn main() !void {
                 try gl.vertexAttribPointer(i, model_va, field.name);
                 try gl.enableVertexAttribArray(i);
             }
-            try gl.drawArrays(.Triangles, 0, 3);
+            try gl.drawArrays(.Triangles, 0, model_va.len);
         }
 
         gfx.flip();
