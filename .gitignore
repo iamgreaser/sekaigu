@@ -1,0 +1,7 @@
+# Output
+/zig-out
+/zig-cache
+
+# VIM
+.sw?
+.*.sw?
