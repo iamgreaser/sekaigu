@@ -69,8 +69,8 @@ pub fn main() !void {
     {
         model_vbo = try gl.genBuffer();
         try gl.bindBuffer(.ArrayBuffer, model_vbo);
-        defer gl.bindBuffer(.ArrayBuffer, null) catch {};
-        try gl.bufferData(.ArrayBuffer, @sizeOf(@TypeOf(model_va)), &model_va, .StaticDraw);
+        defer gl.unbindBuffer(.ArrayBuffer) catch {};
+        try gl.bufferData(.ArrayBuffer, model_va, .StaticDraw);
     }
 
     done: while (true) {
@@ -78,10 +78,10 @@ pub fn main() !void {
         try gl.clear(.{ .color = true, .depth = true });
         {
             try gl.useProgram(shader_prog);
-            defer gl.useProgram(null) catch {};
+            defer gl.unuseProgram() catch {};
 
             try gl.bindBuffer(.ArrayBuffer, model_vbo);
-            defer gl.bindBuffer(.ArrayBuffer, null) catch {};
+            defer gl.unbindBuffer(.ArrayBuffer) catch {};
 
             defer {
                 inline for (@typeInfo(@TypeOf(model_va[0])).Struct.fields, 0..) |_, i| {

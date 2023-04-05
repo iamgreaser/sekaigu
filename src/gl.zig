@@ -110,21 +110,22 @@ pub fn genBuffer() !BO {
     return BO{ .handle = result };
 }
 
-pub fn bindBuffer(buffer_type: BufferType, opt_bo: ?BO) !void {
-    if (opt_bo) |bo| {
-        if (bo.handle == 0) return error.DummyNotAllocated;
-        C.glBindBuffer(@enumToInt(buffer_type), bo.handle);
-    } else {
-        C.glBindBuffer(@enumToInt(buffer_type), 0);
-    }
+pub fn bindBuffer(buffer_type: BufferType, bo: BO) !void {
+    if (bo.handle == 0) return error.DummyNotAllocated;
+    C.glBindBuffer(@enumToInt(buffer_type), bo.handle);
     try _TestError();
 }
 
-pub fn bufferData(buffer_type: BufferType, size: usize, data: anytype, usage: BufferUsage) !void {
+pub fn unbindBuffer(buffer_type: BufferType) !void {
+    C.glBindBuffer(@enumToInt(buffer_type), 0);
+    try _TestError();
+}
+
+pub fn bufferData(buffer_type: BufferType, data: anytype, usage: BufferUsage) !void {
     C.glBufferData(
         @enumToInt(buffer_type),
-        @intCast(c_long, size),
-        data,
+        @intCast(c_long, @sizeOf(@TypeOf(data))),
+        &data,
         @enumToInt(usage),
     );
     try _TestError();
@@ -136,13 +137,14 @@ pub fn createProgram() !Program {
     return Program{ .handle = result };
 }
 
-pub fn useProgram(program: ?Program) !void {
-    if (program) |p| {
-        if (p.handle == 0) return error.DummyNotAllocated;
-        C.glUseProgram(p.handle);
-    } else {
-        C.glUseProgram(0);
-    }
+pub fn useProgram(program: Program) !void {
+    if (program.handle == 0) return error.DummyNotAllocated;
+    C.glUseProgram(program.handle);
+    try _TestError();
+}
+
+pub fn unuseProgram() !void {
+    C.glUseProgram(0);
     try _TestError();
 }
 
