@@ -15,7 +15,7 @@ const model_va = [_]VA_P3F_C3F{
     .{ .pos = .{ -0.70, -0.50, 0.00 }, .color = .{ 0x80, 0xFF, 0x80 } },
     .{ .pos = .{ 0.70, -0.50, 0.00 }, .color = .{ 0x80, 0x80, 0xFF } },
 };
-var model_vbo: C.GLuint = 0;
+var model_vbo: gl.BO = gl.BO.Dummy;
 
 const shader_v_src =
     \\#version 100
@@ -69,10 +69,10 @@ pub fn main() !void {
 
     // Load the VBO
     {
-        C.glGenBuffers(1, &model_vbo);
-        C.glBindBuffer(C.GL_ARRAY_BUFFER, model_vbo);
-        defer C.glBindBuffer(C.GL_ARRAY_BUFFER, 0);
-        C.glBufferData(C.GL_ARRAY_BUFFER, @sizeOf(@TypeOf(model_va)), &model_va, C.GL_STATIC_DRAW);
+        model_vbo = try gl.genBuffer();
+        try gl.bindBuffer(.ArrayBuffer, model_vbo);
+        defer gl.bindBuffer(.ArrayBuffer, null) catch {};
+        try gl.bufferData(.ArrayBuffer, @sizeOf(@TypeOf(model_va)), &model_va, .StaticDraw);
     }
 
     log.warn("GL error status after VBO: {}", .{C.glGetError()});
@@ -90,8 +90,8 @@ pub fn main() !void {
                 }
             }
 
-            C.glBindBuffer(C.GL_ARRAY_BUFFER, model_vbo);
-            defer C.glBindBuffer(C.GL_ARRAY_BUFFER, 0);
+            try gl.bindBuffer(.ArrayBuffer, model_vbo);
+            defer gl.bindBuffer(.ArrayBuffer, null) catch {};
             inline for (@typeInfo(@TypeOf(model_va[0])).Struct.fields, 0..) |field, i| {
                 C.glVertexAttribPointer(
                     i,

@@ -2,6 +2,27 @@ const std = @import("std");
 const log = std.log.scoped(.gl);
 const C = @import("c.zig");
 
+pub const BufferType = enum(c_uint) {
+    ArrayBuffer = C.GL_ARRAY_BUFFER,
+};
+pub const BufferUsage = enum(c_uint) {
+    StreamDraw = C.GL_STREAM_DRAW,
+    StreamRead = C.GL_STREAM_READ,
+    StreamCopy = C.GL_STREAM_COPY,
+    StaticDraw = C.GL_STATIC_DRAW,
+    StaticRead = C.GL_STATIC_READ,
+    StaticCopy = C.GL_STATIC_COPY,
+    DynamicDraw = C.GL_DYNAMIC_DRAW,
+    DynamicRead = C.GL_DYNAMIC_READ,
+    DynamicCopy = C.GL_DYNAMIC_COPY,
+};
+
+pub const BO = struct {
+    handle: C.GLuint,
+    const Self = @This();
+    pub const Dummy = Self{ .handle = 0 };
+};
+
 pub const ShaderType = enum(c_uint) {
     Vertex = C.GL_VERTEX_SHADER,
     Fragment = C.GL_FRAGMENT_SHADER,
@@ -71,6 +92,33 @@ pub fn _TestError() !void {
             return error.GLMiscError;
         },
     }
+}
+
+pub fn genBuffer() !BO {
+    var result: C.GLuint = 0;
+    C.glGenBuffers(1, &result);
+    try _TestError();
+    return BO{ .handle = result };
+}
+
+pub fn bindBuffer(buffer_type: BufferType, opt_bo: ?BO) !void {
+    if (opt_bo) |bo| {
+        if (bo.handle == 0) return error.DummyNotAllocated;
+        C.glBindBuffer(@enumToInt(buffer_type), bo.handle);
+    } else {
+        C.glBindBuffer(@enumToInt(buffer_type), 0);
+    }
+    try _TestError();
+}
+
+pub fn bufferData(buffer_type: BufferType, size: usize, data: anytype, usage: BufferUsage) !void {
+    C.glBufferData(
+        @enumToInt(buffer_type),
+        @intCast(c_long, size),
+        data,
+        @enumToInt(usage),
+    );
+    try _TestError();
 }
 
 pub fn createProgram() !Program {
