@@ -94,8 +94,12 @@ pub const Program = struct {
 pub fn _TestError() !void {
     switch (C.glGetError()) {
         0 => {},
+        // OpenGL ES 2.0-defined errors
+        C.GL_INVALID_ENUM => return error.GLInvalidEnum,
+        C.GL_INVALID_FRAMEBUFFER_OPERATION => return error.GLInvalidFramebufferOperation,
         C.GL_INVALID_VALUE => return error.GLInvalidValue,
         C.GL_INVALID_OPERATION => return error.GLInvalidOperation,
+        C.GL_OUT_OF_MEMORY => return error.GLOutOfMemory,
         else => |e| {
             log.err("OpenGL error code {x}/{}", .{ e, e });
             return error.GLMiscError;
