@@ -2,19 +2,18 @@ const std = @import("std");
 const log = std.log.scoped(.gl);
 const C = @import("c.zig");
 
+fn const_array_type(comptime base: type) type {
+    return []const base;
+}
+
 pub const BufferType = enum(c_uint) {
     ArrayBuffer = C.GL_ARRAY_BUFFER,
+    ElementArrayBuffer = C.GL_ELEMENT_ARRAY_BUFFER,
 };
 pub const BufferUsage = enum(c_uint) {
     StreamDraw = C.GL_STREAM_DRAW,
-    StreamRead = C.GL_STREAM_READ,
-    StreamCopy = C.GL_STREAM_COPY,
     StaticDraw = C.GL_STATIC_DRAW,
-    StaticRead = C.GL_STATIC_READ,
-    StaticCopy = C.GL_STATIC_COPY,
     DynamicDraw = C.GL_DYNAMIC_DRAW,
-    DynamicRead = C.GL_DYNAMIC_READ,
-    DynamicCopy = C.GL_DYNAMIC_COPY,
 };
 pub const DrawMode = enum(c_uint) {
     Points = C.GL_POINTS,
@@ -57,11 +56,11 @@ pub fn unbindBuffer(buffer_type: BufferType) !void {
     try _TestError();
 }
 
-pub fn bufferData(buffer_type: BufferType, data: anytype, usage: BufferUsage) !void {
+pub fn bufferData(buffer_type: BufferType, comptime data_type: type, data: const_array_type(data_type), usage: BufferUsage) !void {
     C.glBufferData(
         @enumToInt(buffer_type),
-        @intCast(c_long, @sizeOf(@TypeOf(data))),
-        &data,
+        @intCast(c_long, @sizeOf(data_type) * data.len),
+        &data[0],
         @enumToInt(usage),
     );
     try _TestError();
@@ -78,11 +77,8 @@ pub fn unuseProgram() !void {
     try _TestError();
 }
 
-fn const_array_type(comptime base: type) type {
-    return []const @typeInfo(base).Array.child;
-}
-pub fn vertexAttribPointer(idx: C.GLuint, comptime ptr_type: type, ptr: const_array_type(ptr_type), comptime field_name: []const u8) !void {
-    const field_type = @TypeOf(@field(ptr[0], field_name));
+pub fn vertexAttribPointer(idx: C.GLuint, comptime ptr_type: type, comptime field_name: []const u8) !void {
+    const field_type = @TypeOf(@field(@intToPtr(*allowzero ptr_type, 0), field_name));
     C.glVertexAttribPointer(
         idx,
         switch (@typeInfo(field_type).Array.len) {
@@ -94,25 +90,22 @@ pub fn vertexAttribPointer(idx: C.GLuint, comptime ptr_type: type, ptr: const_ar
         switch (@typeInfo(field_type).Array.child) {
             u8 => C.GL_UNSIGNED_BYTE,
             u16 => C.GL_UNSIGNED_SHORT,
-            u32 => C.GL_UNSIGNED_INT,
             i8 => C.GL_BYTE,
             i16 => C.GL_SHORT,
-            i32 => C.GL_INT,
             f32 => C.GL_FLOAT,
-            f64 => C.GL_DOUBLE,
             else => {
                 @compileError("unhandled element type for " ++ field_name);
             },
         },
         switch (@typeInfo(field_type).Array.child) {
-            u8, u16, u32, i8, i16, i32 => C.GL_TRUE,
+            u8, u16, i8, i16 => C.GL_TRUE,
             f32 => C.GL_FALSE,
             else => {
                 @compileError("unhandled normalisation for " ++ field_name);
             },
         },
-        @sizeOf(@TypeOf(ptr[0])),
-        &(@field(@intToPtr(*allowzero @TypeOf(ptr[0]), 0), field_name)),
+        @sizeOf(ptr_type),
+        &(@field(@intToPtr(*allowzero ptr_type, 0), field_name)),
     );
     try _TestError();
 }
@@ -127,8 +120,28 @@ pub fn disableVertexAttribArray(idx: C.GLuint) !void {
     try _TestError();
 }
 
-pub fn drawArrays(mode: DrawMode, first: C.GLint, count: usize) !void {
-    C.glDrawArrays(@enumToInt(mode), first, @intCast(C.GLsizei, count));
+pub fn drawArrays(mode: DrawMode, first: usize, count: usize) !void {
+    C.glDrawArrays(
+        @enumToInt(mode),
+        @intCast(C.GLint, first),
+        @intCast(C.GLsizei, count),
+    );
+    try _TestError();
+}
+
+pub fn drawElements(mode: DrawMode, first: usize, count: usize, comptime elem_type: type) !void {
+    C.glDrawElements(
+        @enumToInt(mode),
+        @intCast(C.GLsizei, count),
+        switch (elem_type) {
+            u8 => C.GL_UNSIGNED_BYTE,
+            u16 => C.GL_UNSIGNED_SHORT,
+            else => {
+                @compileError("unhandled element index type");
+            },
+        },
+        @intToPtr(*allowzero anyopaque, first * @sizeOf(elem_type)),
+    );
     try _TestError();
 }
 
