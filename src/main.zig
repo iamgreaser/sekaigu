@@ -67,30 +67,79 @@ var model_base = Model(VA_P3F_C3F, u16){
     .idx_list = &[_]u16{ 0, 1, 2 },
 };
 
-const shader_v_src =
-    \\#version 100
-    \\precision highp float;
-    \\
-    \\attribute vec4 ipos;
-    \\attribute vec4 icolor;
-    \\varying vec4 vcolor;
-    \\
-    \\void main () {
-    \\    vcolor = icolor;
-    \\    gl_Position = ipos;
-    \\}
-;
+pub const MakeShaderSourceOptions = struct {
+    pub const FieldEntry = struct {
+        @"0": []const u8,
+        @"1": []const u8,
+    };
+    vert: []const u8,
+    frag: []const u8,
+    uniforms: []const FieldEntry = &[_]FieldEntry{},
+    attribs: []const FieldEntry = &[_]FieldEntry{},
+    varyings: []const FieldEntry = &[_]FieldEntry{},
+};
+pub const ShaderSourceBlob = struct {
+    vert_src: []const u8,
+    frag_src: []const u8,
+};
 
-const shader_f_src =
-    \\#version 100
-    \\precision highp float;
-    \\
-    \\varying vec4 vcolor;
-    \\
-    \\void main () {
-    \\    gl_FragColor = vcolor;
-    \\}
-;
+fn _makeFieldList(
+    comptime accum: []const u8,
+    comptime prefix: []const u8,
+    comptime fields: []const MakeShaderSourceOptions.FieldEntry,
+) []const u8 {
+    if (fields.len >= 1) {
+        return _makeFieldList(
+            accum ++ prefix ++ " " ++ fields[0].@"0" ++ " " ++ fields[0].@"1" ++ ";\n",
+            prefix,
+            fields[1..],
+        );
+    } else {
+        return accum;
+    }
+}
+pub fn makeShaderSource(comptime opts: MakeShaderSourceOptions) ShaderSourceBlob {
+    const versionblock =
+        \\#version 100
+        \\precision highp float;
+        \\
+    ;
+    const uniforms = _makeFieldList("", "uniform", opts.uniforms);
+    const attribs = _makeFieldList("", "attribute", opts.attribs);
+    const varyings = _makeFieldList("", "varying", opts.varyings);
+    const commonheader = versionblock ++ uniforms;
+    return ShaderSourceBlob{
+        .vert_src = commonheader ++ attribs ++ varyings ++ opts.vert,
+        .frag_src = commonheader ++ varyings ++ opts.frag,
+    };
+}
+
+const shader_src = makeShaderSource(.{
+    .uniforms = &[_]MakeShaderSourceOptions.FieldEntry{
+        .{ "float", "zrot" },
+    },
+    .attribs = &[_]MakeShaderSourceOptions.FieldEntry{
+        .{ "vec4", "ipos" },
+        .{ "vec4", "icolor" },
+    },
+    .varyings = &[_]MakeShaderSourceOptions.FieldEntry{
+        .{ "vec4", "vcolor" },
+    },
+    .vert = (
+        \\void main () {
+        \\    vcolor = icolor;
+        \\    vec4 rpos = ipos;
+        \\    rpos.xy = (rpos.xy * cos(zrot) + rpos.yx * vec2(1.0, -1.0) * sin(zrot));
+        \\    rpos.x *= 600.0/800.0;
+        \\    gl_Position = rpos;
+        \\}
+    ),
+    .frag = (
+        \\void main () {
+        \\    gl_FragColor = vcolor;
+        \\}
+    ),
+});
 var shader_v: gl.Shader = gl.Shader.Dummy;
 var shader_f: gl.Shader = gl.Shader.Dummy;
 var shader_prog: gl.Program = gl.Program.Dummy;
@@ -109,8 +158,8 @@ pub fn main() !void {
     inline for (@typeInfo(@TypeOf(model_base.va[0])).Struct.fields, 0..) |field, i| {
         try shader_prog.bindAttribLocation(i, "i" ++ field.name);
     }
-    try shader_v.shaderSource(shader_v_src);
-    try shader_f.shaderSource(shader_f_src);
+    try shader_v.shaderSource(shader_src.vert_src);
+    try shader_f.shaderSource(shader_src.frag_src);
     try shader_v.compileShader();
     try shader_f.compileShader();
     try shader_prog.linkProgram();
@@ -118,17 +167,25 @@ pub fn main() !void {
     // Load the VBOs
     try model_base.load();
 
+    var ang: f64 = 0.0;
+    const uni_zrot = C.glGetUniformLocation(shader_prog.handle, "zrot");
+    try gl._TestError();
     done: while (true) {
         try gl.clearColor(0.2, 0.0, 0.4, 0.0);
         try gl.clear(.{ .color = true, .depth = true });
         {
             try gl.useProgram(shader_prog);
+            if (uni_zrot >= 0) {
+                C.glUniform1f(uni_zrot, @floatCast(f32, ang));
+                try gl._TestError();
+            }
             defer gl.unuseProgram() catch {};
 
             try model_base.draw(.Triangles);
         }
 
         gfx.flip();
+        ang = @mod(ang + 3.141593 * 2.0 / 3.0 / 60.0, 3.141593 * 2.0);
         C.SDL_Delay(10);
         var ev: C.SDL_Event = undefined;
         if (C.SDL_PollEvent(&ev) != 0) {
