@@ -74,14 +74,33 @@ pub const MakeShaderSourceOptions = struct {
     };
     vert: []const u8,
     frag: []const u8,
+    attrib_type: type,
     uniforms: []const FieldEntry = &[_]FieldEntry{},
-    attribs: []const FieldEntry = &[_]FieldEntry{},
     varyings: []const FieldEntry = &[_]FieldEntry{},
 };
 pub const ShaderSourceBlob = struct {
     vert_src: []const u8,
     frag_src: []const u8,
 };
+
+pub fn zigTypeToGlslType(comptime T: type) []const u8 {
+    return switch (T) {
+        f32, u8, i8, u16, i16 => "float",
+        else => switch (@typeInfo(T)) {
+            .Array => |U| switch (U.child) {
+                f32, u8, i8, u16, i16 => switch (U.len) {
+                    1 => "float",
+                    2 => "vec2",
+                    3 => "vec3",
+                    4 => "vec4",
+                    else => @compileError("invalid array length for conversion to GLSL"),
+                },
+                else => @compileError("unhandled array type for conversion to GLSL"),
+            },
+            else => @compileError("unhandled type for conversion to GLSL"),
+        },
+    };
+}
 
 fn _makeFieldList(
     comptime accum: []const u8,
@@ -98,6 +117,21 @@ fn _makeFieldList(
         return accum;
     }
 }
+fn _makeStructFieldList(
+    comptime accum: []const u8,
+    comptime prefix: []const u8,
+    comptime fields: []const std.builtin.Type.StructField,
+) []const u8 {
+    if (fields.len >= 1) {
+        return _makeStructFieldList(
+            accum ++ prefix ++ " " ++ zigTypeToGlslType(fields[0].type) ++ " " ++ ("i" ++ fields[0].name) ++ ";\n",
+            prefix,
+            fields[1..],
+        );
+    } else {
+        return accum;
+    }
+}
 pub fn makeShaderSource(comptime opts: MakeShaderSourceOptions) ShaderSourceBlob {
     const versionblock =
         \\#version 100
@@ -105,7 +139,7 @@ pub fn makeShaderSource(comptime opts: MakeShaderSourceOptions) ShaderSourceBlob
         \\
     ;
     const uniforms = _makeFieldList("", "uniform", opts.uniforms);
-    const attribs = _makeFieldList("", "attribute", opts.attribs);
+    const attribs = _makeStructFieldList("", "attribute", @typeInfo(opts.attrib_type).Struct.fields);
     const varyings = _makeFieldList("", "varying", opts.varyings);
     const commonheader = versionblock ++ uniforms;
     return ShaderSourceBlob{
@@ -118,17 +152,14 @@ const shader_src = makeShaderSource(.{
     .uniforms = &[_]MakeShaderSourceOptions.FieldEntry{
         .{ "float", "zrot" },
     },
-    .attribs = &[_]MakeShaderSourceOptions.FieldEntry{
-        .{ "vec4", "ipos" },
-        .{ "vec4", "icolor" },
-    },
+    .attrib_type = VA_P3F_C3F,
     .varyings = &[_]MakeShaderSourceOptions.FieldEntry{
         .{ "vec4", "vcolor" },
     },
     .vert = (
         \\void main () {
-        \\    vcolor = icolor;
-        \\    vec4 rpos = ipos;
+        \\    vcolor = vec4(icolor, 1.0);
+        \\    vec4 rpos = vec4(ipos, 1.0);
         \\    rpos.xy = (rpos.xy * cos(zrot) + rpos.yx * vec2(1.0, -1.0) * sin(zrot));
         \\    rpos.x *= 600.0/800.0;
         \\    gl_Position = rpos;
