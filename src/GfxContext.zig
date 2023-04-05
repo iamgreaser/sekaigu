@@ -1,6 +1,5 @@
 const std = @import("std");
 const log = std.log.scoped(.gfx_context);
-
 const C = @import("c.zig");
 
 const Self = @This();

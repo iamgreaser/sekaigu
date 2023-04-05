@@ -1,9 +1,9 @@
 const std = @import("std");
 const log = std.log.scoped(.main);
-
 const C = @import("c.zig");
 
 const GfxContext = @import("GfxContext.zig");
+const gl = @import("gl.zig");
 
 pub const VA_P3F_C3F = struct {
     pos: [3]f32,
@@ -41,9 +41,9 @@ const shader_f_src =
     \\    gl_FragColor = vcolor;
     \\}
 ;
-var shader_v: C.GLuint = 0;
-var shader_f: C.GLuint = 0;
-var shader_prog: C.GLuint = 0;
+var shader_v: gl.Shader = gl.Shader.Dummy;
+var shader_f: gl.Shader = gl.Shader.Dummy;
+var shader_prog: gl.Program = gl.Program.Dummy;
 
 pub fn main() !void {
     var gfx = try GfxContext.new();
@@ -53,30 +53,19 @@ pub fn main() !void {
     log.warn("GL error status at start: {}", .{C.glGetError()});
 
     // Compile the shader
-    shader_prog = C.glCreateProgram();
-    shader_v = C.glCreateShader(C.GL_VERTEX_SHADER);
-    shader_f = C.glCreateShader(C.GL_FRAGMENT_SHADER);
-    C.glAttachShader(shader_prog, shader_v);
-    C.glAttachShader(shader_prog, shader_f);
+    shader_prog = try gl.createProgram();
+    shader_v = try gl.createShader(.Vertex);
+    shader_f = try gl.createShader(.Fragment);
+    try shader_prog.attachShader(shader_v);
+    try shader_prog.attachShader(shader_f);
     inline for (@typeInfo(@TypeOf(model_va[0])).Struct.fields, 0..) |field, i| {
-        C.glBindAttribLocation(shader_prog, i, "i" ++ field.name);
+        try shader_prog.bindAttribLocation(i, "i" ++ field.name);
     }
-    C.glShaderSource(shader_v, 1, &[_][*]const u8{shader_v_src}, &[_]C.GLint{shader_v_src.len});
-    C.glShaderSource(shader_f, 1, &[_][*]const u8{shader_f_src}, &[_]C.GLint{shader_f_src.len});
-    C.glCompileShader(shader_v);
-    C.glCompileShader(shader_f);
-    C.glLinkProgram(shader_prog);
-    {
-        var buf: [1024]u8 = undefined;
-        var buflen: C.GLsizei = 0;
-        C.glGetShaderInfoLog(shader_v, buf.len, &buflen, &buf);
-        log.info("VERTEX SHADER LOG: <<<\n{s}\n>>>", .{buf[0..@intCast(usize, buflen)]});
-        C.glGetShaderInfoLog(shader_f, buf.len, &buflen, &buf);
-        log.info("FRAGMENT SHADER LOG: <<<\n{s}\n>>>", .{buf[0..@intCast(usize, buflen)]});
-        C.glGetProgramInfoLog(shader_prog, buf.len, &buflen, &buf);
-        log.info("PROGRAM LOG: <<<\n{s}\n>>>", .{buf[0..@intCast(usize, buflen)]});
-    }
-    log.warn("GL error status after shaders: {}", .{C.glGetError()});
+    try shader_v.shaderSource(shader_v_src);
+    try shader_f.shaderSource(shader_f_src);
+    try shader_v.compileShader();
+    try shader_f.compileShader();
+    try shader_prog.linkProgram();
 
     // Load the VBO
     {
@@ -93,8 +82,8 @@ pub fn main() !void {
         C.glClear(C.GL_COLOR_BUFFER_BIT);
 
         {
-            C.glUseProgram(shader_prog);
-            defer C.glUseProgram(0);
+            try gl.useProgram(shader_prog);
+            defer gl.useProgram(null) catch {};
             defer {
                 inline for (@typeInfo(@TypeOf(model_va[0])).Struct.fields, 0..) |_, i| {
                     C.glDisableVertexAttribArray(i);
