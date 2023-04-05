@@ -45,6 +45,25 @@ var shader_v: gl.Shader = gl.Shader.Dummy;
 var shader_f: gl.Shader = gl.Shader.Dummy;
 var shader_prog: gl.Program = gl.Program.Dummy;
 
+fn const_array_type(comptime base: type) type {
+    return []const @typeInfo(base).Array.child;
+}
+pub fn drawModel(mode: gl.DrawMode, vbo: gl.BO, comptime model_type: type, model: const_array_type(model_type)) !void {
+    try gl.bindBuffer(.ArrayBuffer, vbo);
+    defer gl.unbindBuffer(.ArrayBuffer) catch {};
+
+    defer {
+        inline for (@typeInfo(@TypeOf(model[0])).Struct.fields, 0..) |_, i| {
+            gl.disableVertexAttribArray(i) catch {};
+        }
+    }
+    inline for (@typeInfo(@TypeOf(model[0])).Struct.fields, 0..) |field, i| {
+        try gl.vertexAttribPointer(i, model_type, model, field.name);
+        try gl.enableVertexAttribArray(i);
+    }
+    try gl.drawArrays(mode, 0, model.len);
+}
+
 pub fn main() !void {
     var gfx = try GfxContext.new();
     try gfx.init();
@@ -80,19 +99,7 @@ pub fn main() !void {
             try gl.useProgram(shader_prog);
             defer gl.unuseProgram() catch {};
 
-            try gl.bindBuffer(.ArrayBuffer, model_vbo);
-            defer gl.unbindBuffer(.ArrayBuffer) catch {};
-
-            defer {
-                inline for (@typeInfo(@TypeOf(model_va[0])).Struct.fields, 0..) |_, i| {
-                    gl.disableVertexAttribArray(i) catch {};
-                }
-            }
-            inline for (@typeInfo(@TypeOf(model_va[0])).Struct.fields, 0..) |field, i| {
-                try gl.vertexAttribPointer(i, model_va, field.name);
-                try gl.enableVertexAttribArray(i);
-            }
-            try gl.drawArrays(.Triangles, 0, model_va.len);
+            try drawModel(.Triangles, model_vbo, @TypeOf(model_va), &model_va);
         }
 
         gfx.flip();

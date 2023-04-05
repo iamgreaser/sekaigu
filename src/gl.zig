@@ -158,7 +158,10 @@ pub fn createShader(shader_type: ShaderType) !Shader {
     return Shader{ .handle = result };
 }
 
-pub fn vertexAttribPointer(idx: C.GLuint, comptime ptr: anytype, comptime field_name: []const u8) !void {
+fn const_array_type(comptime base: type) type {
+    return []const @typeInfo(base).Array.child;
+}
+pub fn vertexAttribPointer(idx: C.GLuint, comptime ptr_type: type, ptr: const_array_type(ptr_type), comptime field_name: []const u8) !void {
     const field_type = @TypeOf(@field(ptr[0], field_name));
     C.glVertexAttribPointer(
         idx,
@@ -204,8 +207,8 @@ pub fn disableVertexAttribArray(idx: C.GLuint) !void {
     try _TestError();
 }
 
-pub fn drawArrays(mode: DrawMode, first: C.GLint, count: C.GLsizei) !void {
-    C.glDrawArrays(@enumToInt(mode), first, count);
+pub fn drawArrays(mode: DrawMode, first: C.GLint, count: usize) !void {
+    C.glDrawArrays(@enumToInt(mode), first, @intCast(C.GLsizei, count));
     try _TestError();
 }
 
