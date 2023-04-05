@@ -26,70 +26,9 @@ pub const DrawMode = enum(c_uint) {
     Triangles = C.GL_TRIANGLES,
 };
 
-pub const BO = struct {
-    handle: C.GLuint,
-    const Self = @This();
-    pub const Dummy = Self{ .handle = 0 };
-};
-
-pub const ShaderType = enum(c_uint) {
-    Vertex = C.GL_VERTEX_SHADER,
-    Fragment = C.GL_FRAGMENT_SHADER,
-};
-
-pub const Shader = struct {
-    handle: C.GLuint,
-    const Self = @This();
-    pub const Dummy = Self{ .handle = 0 };
-
-    pub fn shaderSource(shader: Shader, src: []const u8) !void {
-        C.glShaderSource(
-            shader.handle,
-            1,
-            &[_][*c]const u8{&src[0]},
-            &[_]C.GLint{@intCast(c_int, src.len)},
-        );
-        try _TestError();
-    }
-
-    pub fn compileShader(self: Self) !void {
-        C.glCompileShader(self.handle);
-        {
-            var buf: [1024]u8 = undefined;
-            var buflen: C.GLsizei = 0;
-            C.glGetShaderInfoLog(self.handle, buf.len, &buflen, &buf);
-            log.info("SHADER LOG: <<<\n{s}\n>>>", .{buf[0..@intCast(usize, buflen)]});
-        }
-        try _TestError();
-    }
-};
-
-pub const Program = struct {
-    handle: C.GLuint,
-    const Self = @This();
-    pub const Dummy = Self{ .handle = 0 };
-
-    pub fn attachShader(self: Self, shader: Shader) !void {
-        C.glAttachShader(self.handle, shader.handle);
-        try _TestError();
-    }
-
-    pub fn bindAttribLocation(self: Self, idx: C.GLuint, name: [:0]const u8) !void {
-        C.glBindAttribLocation(self.handle, idx, name);
-        try _TestError();
-    }
-
-    pub fn linkProgram(self: Self) !void {
-        C.glLinkProgram(self.handle);
-        {
-            var buf: [1024]u8 = undefined;
-            var buflen: C.GLsizei = 0;
-            C.glGetProgramInfoLog(self.handle, buf.len, &buflen, &buf);
-            log.info("PROGRAM LOG: <<<\n{s}\n>>>", .{buf[0..@intCast(usize, buflen)]});
-        }
-        try _TestError();
-    }
-};
+pub const BO = @import("gl/BO.zig");
+pub const Program = @import("gl/Program.zig");
+pub const Shader = @import("gl/Shader.zig");
 
 pub fn _TestError() !void {
     switch (C.glGetError()) {
@@ -152,7 +91,7 @@ pub fn unuseProgram() !void {
     try _TestError();
 }
 
-pub fn createShader(shader_type: ShaderType) !Shader {
+pub fn createShader(shader_type: Shader.Type) !Shader {
     const result = C.glCreateShader(@enumToInt(shader_type));
     try _TestError();
     return Shader{ .handle = result };
