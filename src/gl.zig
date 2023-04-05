@@ -46,13 +46,6 @@ pub fn _TestError() !void {
     }
 }
 
-pub fn genBuffer() !BO {
-    var result: C.GLuint = 0;
-    C.glGenBuffers(1, &result);
-    try _TestError();
-    return BO{ .handle = result };
-}
-
 pub fn bindBuffer(buffer_type: BufferType, bo: BO) !void {
     if (bo.handle == 0) return error.DummyNotAllocated;
     C.glBindBuffer(@enumToInt(buffer_type), bo.handle);
@@ -74,12 +67,6 @@ pub fn bufferData(buffer_type: BufferType, data: anytype, usage: BufferUsage) !v
     try _TestError();
 }
 
-pub fn createProgram() !Program {
-    const result = C.glCreateProgram();
-    try _TestError();
-    return Program{ .handle = result };
-}
-
 pub fn useProgram(program: Program) !void {
     if (program.handle == 0) return error.DummyNotAllocated;
     C.glUseProgram(program.handle);
@@ -89,12 +76,6 @@ pub fn useProgram(program: Program) !void {
 pub fn unuseProgram() !void {
     C.glUseProgram(0);
     try _TestError();
-}
-
-pub fn createShader(shader_type: Shader.Type) !Shader {
-    const result = C.glCreateShader(@enumToInt(shader_type));
-    try _TestError();
-    return Shader{ .handle = result };
 }
 
 fn const_array_type(comptime base: type) type {

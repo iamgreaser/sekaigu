@@ -7,3 +7,10 @@ const _TestError = gl._TestError;
 handle: C.GLuint,
 const Self = @This();
 pub const Dummy = Self{ .handle = 0 };
+
+pub fn genBuffer() !Self {
+    var result: C.GLuint = 0;
+    C.glGenBuffers(1, &result);
+    try _TestError();
+    return Self{ .handle = result };
+}

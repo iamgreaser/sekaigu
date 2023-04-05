@@ -70,9 +70,9 @@ pub fn main() !void {
     defer gfx.free();
 
     // Compile the shader
-    shader_prog = try gl.createProgram();
-    shader_v = try gl.createShader(.Vertex);
-    shader_f = try gl.createShader(.Fragment);
+    shader_prog = try gl.Program.createProgram();
+    shader_v = try gl.Shader.createShader(.Vertex);
+    shader_f = try gl.Shader.createShader(.Fragment);
     try shader_prog.attachShader(shader_v);
     try shader_prog.attachShader(shader_f);
     inline for (@typeInfo(@TypeOf(model_va[0])).Struct.fields, 0..) |field, i| {
@@ -86,7 +86,7 @@ pub fn main() !void {
 
     // Load the VBO
     {
-        model_vbo = try gl.genBuffer();
+        model_vbo = try gl.BO.genBuffer();
         try gl.bindBuffer(.ArrayBuffer, model_vbo);
         defer gl.unbindBuffer(.ArrayBuffer) catch {};
         try gl.bufferData(.ArrayBuffer, model_va, .StaticDraw);

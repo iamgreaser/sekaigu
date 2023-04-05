@@ -8,6 +8,12 @@ handle: C.GLuint,
 const Self = @This();
 pub const Dummy = Self{ .handle = 0 };
 
+pub fn createProgram() !Self {
+    const result = C.glCreateProgram();
+    try _TestError();
+    return Self{ .handle = result };
+}
+
 pub fn attachShader(self: Self, shader: gl.Shader) !void {
     C.glAttachShader(self.handle, shader.handle);
     try _TestError();

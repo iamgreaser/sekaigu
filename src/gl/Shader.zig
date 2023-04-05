@@ -13,6 +13,12 @@ pub const Type = enum(c_uint) {
     Fragment = C.GL_FRAGMENT_SHADER,
 };
 
+pub fn createShader(shader_type: Self.Type) !Self {
+    const result = C.glCreateShader(@enumToInt(shader_type));
+    try _TestError();
+    return Self{ .handle = result };
+}
+
 pub fn shaderSource(shader: Self, src: []const u8) !void {
     C.glShaderSource(
         shader.handle,
