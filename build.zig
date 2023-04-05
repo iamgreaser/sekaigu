@@ -15,7 +15,7 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
-    const exe = b.addExecutable(.{
+    var exe = b.addExecutable(.{
         .name = "cockel",
         // In this case the main source file is merely a path, however, in more
         // complicated build scripts, this could be a generated file.
@@ -23,7 +23,41 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    exe.addIncludePath("/usr/include/SDL2");
+    // zig build only strips on ReleaseSmall. I'd like to strip on all Release* things, especially ReleaseSafe --GM
+    if (optimize != .Debug) {
+        exe.strip = true; // There is no zig build API for this yet AFAIK --GM
+    }
+    switch (target.os_tag orelse .freestanding) {
+        .windows => {
+            // FIXME this doesn't link, instead throwing an unsearchable error:
+            //     error: lld-link: ___stack_chk_fail was replaced
+            // --GM
+
+            // Libraries to grab:
+            // - SDL2 - MinGW development version
+            // - libepoxy - build this yourself, zig cc seems to handle it OK?
+            //     - We might have to bring this in as a submodule. --GM
+            exe.addIncludePath("./wlibs/include");
+            exe.addLibraryPath("./wlibs/lib");
+
+            exe.linkSystemLibrary("kernel32");
+            exe.linkSystemLibrary("user32");
+            exe.linkSystemLibrary("gdi32");
+            exe.linkSystemLibrary("oleaut32");
+            exe.linkSystemLibrary("ole32");
+            exe.linkSystemLibrary("imm32");
+            exe.linkSystemLibrary("winmm");
+            exe.linkSystemLibrary("version");
+            exe.linkSystemLibrary("setupapi");
+            exe.linkSystemLibrary("xinput"); // Not provided by Zig, grab from MinGW-W64, needed for later SDL2 versions
+            exe.linkSystemLibrary("SDL2main");
+            exe.linkSystemLibrary("mingw32");
+        },
+        else => {
+            // TODO: Get the actual path properly --GM
+            exe.addIncludePath("/usr/include/SDL2");
+        },
+    }
     exe.linkSystemLibrary("c");
     exe.linkSystemLibrary("SDL2");
     exe.linkSystemLibrary("epoxy");

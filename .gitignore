@@ -1,3 +1,7 @@
+# Libs
+*.dll
+/wlibs
+
 # Output
 /zig-out
 /zig-cache
