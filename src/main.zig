@@ -150,7 +150,7 @@ pub fn main() !void {
         a: bool = false,
         s: bool = false,
         d: bool = false,
-        LCTRL: bool = false,
+        c: bool = false,
         SPACE: bool = false,
         LEFT: bool = false,
         RIGHT: bool = false,
@@ -193,7 +193,7 @@ pub fn main() !void {
             0.0,
         }).sub(Vec4f.new(.{
             if (keys.a) @as(f32, 1.0) else @as(f32, 0.0),
-            if (keys.LCTRL) @as(f32, 1.0) else @as(f32, 0.0),
+            if (keys.c) @as(f32, 1.0) else @as(f32, 0.0),
             if (keys.w) @as(f32, 1.0) else @as(f32, 0.0),
             0.0,
         })).mul(5.0);
