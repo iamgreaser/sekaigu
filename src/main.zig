@@ -4,6 +4,13 @@ const C = @import("c.zig");
 
 const GfxContext = @import("GfxContext.zig");
 const gl = @import("gl.zig");
+const linalg = @import("linalg.zig");
+const Vec2f = linalg.Vec2f;
+const Vec3f = linalg.Vec3f;
+const Vec4f = linalg.Vec4f;
+const Mat2f = linalg.Mat2f;
+const Mat3f = linalg.Mat3f;
+const Mat4f = linalg.Mat4f;
 
 pub const VA_P3F_C3F = struct {
     pos: [3]f32,
@@ -75,7 +82,7 @@ pub const MakeShaderSourceOptions = struct {
     vert: []const u8,
     frag: []const u8,
     attrib_type: type,
-    uniforms: []const FieldEntry = &[_]FieldEntry{},
+    uniform_type: type,
     varyings: []const FieldEntry = &[_]FieldEntry{},
 };
 pub const ShaderSourceBlob = struct {
@@ -83,16 +90,23 @@ pub const ShaderSourceBlob = struct {
     frag_src: []const u8,
 };
 
-pub fn zigTypeToGlslType(comptime T: type) []const u8 {
+pub fn zigTypeToGlslType(comptime T: type, comptime exact: bool) []const u8 {
     return switch (T) {
-        f32, u8, i8, u16, i16 => "float",
+        u8, i8, u16, i16 => if (exact) "int" else "float",
+        f32 => "float",
+        Vec2f => if (exact) "vec2" else "vec4",
+        Vec3f => if (exact) "vec3" else "vec4",
+        Vec4f => if (exact) "vec4" else "vec4",
+        Mat2f => "mat2",
+        Mat3f => "mat3",
+        Mat4f => "mat4",
         else => switch (@typeInfo(T)) {
             .Array => |U| switch (U.child) {
                 f32, u8, i8, u16, i16 => switch (U.len) {
                     1 => "float",
-                    2 => "vec2",
-                    3 => "vec3",
-                    4 => "vec4",
+                    2 => if (exact) "vec2" else "vec4",
+                    3 => if (exact) "vec3" else "vec4",
+                    4 => if (exact) "vec4" else "vec4",
                     else => @compileError("invalid array length for conversion to GLSL"),
                 },
                 else => @compileError("unhandled array type for conversion to GLSL"),
@@ -120,13 +134,17 @@ fn _makeFieldList(
 fn _makeStructFieldList(
     comptime accum: []const u8,
     comptime prefix: []const u8,
+    comptime name_prefix: []const u8,
     comptime fields: []const std.builtin.Type.StructField,
+    comptime exact: bool,
 ) []const u8 {
     if (fields.len >= 1) {
         return _makeStructFieldList(
-            accum ++ prefix ++ " " ++ zigTypeToGlslType(fields[0].type) ++ " " ++ ("i" ++ fields[0].name) ++ ";\n",
+            accum ++ prefix ++ " " ++ zigTypeToGlslType(fields[0].type, exact) ++ " " ++ (name_prefix ++ fields[0].name) ++ ";\n",
             prefix,
+            name_prefix,
             fields[1..],
+            exact,
         );
     } else {
         return accum;
@@ -138,8 +156,8 @@ pub fn makeShaderSource(comptime opts: MakeShaderSourceOptions) ShaderSourceBlob
         \\precision highp float;
         \\
     ;
-    const uniforms = _makeFieldList("", "uniform", opts.uniforms);
-    const attribs = _makeStructFieldList("", "attribute", @typeInfo(opts.attrib_type).Struct.fields);
+    const uniforms = _makeStructFieldList("", "uniform", "", @typeInfo(opts.uniform_type).Struct.fields, true);
+    const attribs = _makeStructFieldList("", "attribute", "i", @typeInfo(opts.attrib_type).Struct.fields, false);
     const varyings = _makeFieldList("", "varying", opts.varyings);
     const commonheader = versionblock ++ uniforms;
     return ShaderSourceBlob{
@@ -148,18 +166,28 @@ pub fn makeShaderSource(comptime opts: MakeShaderSourceOptions) ShaderSourceBlob
     };
 }
 
+pub fn loadUniforms(program: gl.Program, comptime T: type, uniforms: *const T) !void {
+    inline for (@typeInfo(T).Struct.fields) |field| {
+        try program.uniform(field.name, field.type, @field(uniforms, field.name));
+    }
+}
+var shader_uniforms: struct {
+    zrot: f32 = 0.0,
+    tintcolor: Vec4f = Vec4f.new(.{ 1.0, 0.8, 1.0, 1.0 }),
+    mproj: Mat4f = Mat4f.I,
+    mcam: Mat4f = Mat4f.I,
+    mmodel: Mat4f = Mat4f.I,
+} = .{};
 const shader_src = makeShaderSource(.{
-    .uniforms = &[_]MakeShaderSourceOptions.FieldEntry{
-        .{ "float", "zrot" },
-    },
+    .uniform_type = @TypeOf(shader_uniforms),
     .attrib_type = VA_P3F_C3F,
     .varyings = &[_]MakeShaderSourceOptions.FieldEntry{
         .{ "vec4", "vcolor" },
     },
     .vert = (
         \\void main () {
-        \\    vcolor = vec4(icolor, 1.0);
-        \\    vec4 rpos = vec4(ipos, 1.0);
+        \\    vcolor = icolor;
+        \\    vec4 rpos = ipos;
         \\    rpos.xy = (rpos.xy * cos(zrot) + rpos.yx * vec2(1.0, -1.0) * sin(zrot));
         \\    rpos.x *= 600.0/800.0;
         \\    gl_Position = rpos;
@@ -167,7 +195,7 @@ const shader_src = makeShaderSource(.{
     ),
     .frag = (
         \\void main () {
-        \\    gl_FragColor = vcolor;
+        \\    gl_FragColor = vcolor * tintcolor;
         \\}
     ),
 });
@@ -198,25 +226,19 @@ pub fn main() !void {
     // Load the VBOs
     try model_base.load();
 
-    var ang: f64 = 0.0;
-    const uni_zrot = C.glGetUniformLocation(shader_prog.handle, "zrot");
-    try gl._TestError();
     done: while (true) {
         try gl.clearColor(0.2, 0.0, 0.4, 0.0);
         try gl.clear(.{ .color = true, .depth = true });
         {
             try gl.useProgram(shader_prog);
-            if (uni_zrot >= 0) {
-                C.glUniform1f(uni_zrot, @floatCast(f32, ang));
-                try gl._TestError();
-            }
             defer gl.unuseProgram() catch {};
+            try loadUniforms(shader_prog, @TypeOf(shader_uniforms), &shader_uniforms);
 
             try model_base.draw(.Triangles);
         }
 
         gfx.flip();
-        ang = @mod(ang + 3.141593 * 2.0 / 3.0 / 60.0, 3.141593 * 2.0);
+        shader_uniforms.zrot = @mod(shader_uniforms.zrot + 3.141593 * 2.0 / 3.0 / 60.0, 3.141593 * 2.0);
         C.SDL_Delay(10);
         var ev: C.SDL_Event = undefined;
         if (C.SDL_PollEvent(&ev) != 0) {
