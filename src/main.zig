@@ -113,8 +113,6 @@ const shader_src = shadermagic.makeShaderSource(.{
         \\}
     ),
 });
-var shader_v: gl.Shader = gl.Shader.Dummy;
-var shader_f: gl.Shader = gl.Shader.Dummy;
 var shader_prog: gl.Program = gl.Program.Dummy;
 
 pub fn main() !void {
@@ -123,19 +121,7 @@ pub fn main() !void {
     defer gfx.free();
 
     // Compile the shader
-    shader_prog = try gl.Program.createProgram();
-    shader_v = try gl.Shader.createShader(.Vertex);
-    shader_f = try gl.Shader.createShader(.Fragment);
-    try shader_prog.attachShader(shader_v);
-    try shader_prog.attachShader(shader_f);
-    inline for (@typeInfo(@TypeOf(model_base.va[0])).Struct.fields, 0..) |field, i| {
-        try shader_prog.bindAttribLocation(i, "i" ++ field.name);
-    }
-    try shader_v.shaderSource(shader_src.vert_src);
-    try shader_f.shaderSource(shader_src.frag_src);
-    try shader_v.compileShader();
-    try shader_f.compileShader();
-    try shader_prog.linkProgram();
+    shader_prog = try shader_src.compileProgram();
 
     // Load the VBOs
     try model_base.load();

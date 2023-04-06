@@ -1,6 +1,7 @@
 const std = @import("std");
 const log = std.log.scoped(.shadermagic);
 const gl = @import("gl.zig");
+const C = @import("c.zig");
 const linalg = @import("linalg.zig");
 const Vec2f = linalg.Vec2f;
 const Vec3f = linalg.Vec3f;
@@ -21,8 +22,27 @@ pub const MakeShaderSourceOptions = struct {
     varyings: []const FieldEntry = &[_]FieldEntry{},
 };
 pub const ShaderSourceBlob = struct {
+    pub const Self = @This();
     vert_src: []const u8,
     frag_src: []const u8,
+    attrib_names: []const [:0]const u8,
+
+    pub fn compileProgram(self: Self) !gl.Program {
+        const shader_prog = try gl.Program.createProgram();
+        const shader_v = try gl.Shader.createShader(.Vertex);
+        const shader_f = try gl.Shader.createShader(.Fragment);
+        try shader_prog.attachShader(shader_v);
+        try shader_prog.attachShader(shader_f);
+        for (self.attrib_names, 0..) |name, i| {
+            try shader_prog.bindAttribLocation(@intCast(C.GLuint, i), name);
+        }
+        try shader_v.shaderSource(self.vert_src);
+        try shader_f.shaderSource(self.frag_src);
+        try shader_v.compileShader();
+        try shader_f.compileShader();
+        try shader_prog.linkProgram();
+        return shader_prog;
+    }
 };
 
 pub fn zigTypeToGlslType(comptime T: type, comptime exact: bool) []const u8 {
@@ -85,6 +105,19 @@ fn _makeStructFieldList(
         return accum;
     }
 }
+fn _makeShaderNames(
+    comptime accum: []const [:0]const u8,
+    comptime fields: []const std.builtin.Type.StructField,
+) []const [:0]const u8 {
+    if (fields.len >= 1) {
+        return _makeShaderNames(
+            accum ++ [_][:0]const u8{"i" ++ fields[0].name},
+            fields[1..],
+        );
+    } else {
+        return accum;
+    }
+}
 pub fn makeShaderSource(comptime opts: MakeShaderSourceOptions) ShaderSourceBlob {
     const versionblock =
         \\#version 100
@@ -94,10 +127,12 @@ pub fn makeShaderSource(comptime opts: MakeShaderSourceOptions) ShaderSourceBlob
     const uniforms = _makeStructFieldList("", "uniform", "", @typeInfo(opts.uniform_type).Struct.fields, true);
     const attribs = _makeStructFieldList("", "attribute", "i", @typeInfo(opts.attrib_type).Struct.fields, false);
     const varyings = _makeFieldList("", "varying", opts.varyings);
+    const attrib_names = _makeShaderNames(&[_][:0]const u8{}, @typeInfo(opts.attrib_type).Struct.fields);
     const commonheader = versionblock ++ uniforms;
     return ShaderSourceBlob{
         .vert_src = commonheader ++ attribs ++ varyings ++ opts.vert,
         .frag_src = commonheader ++ varyings ++ opts.frag,
+        .attrib_names = attrib_names,
     };
 }
 
