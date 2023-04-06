@@ -134,7 +134,7 @@ pub fn main() !void {
     done: while (true) {
         try gl.clearColor(0.2, 0.0, 0.4, 0.0);
         try gl.clear(.{ .color = true, .depth = true });
-        shader_uniforms.mmodel = Mat4f.I.rotate(zrot, 0.0, 0.0, -2.0);
+        shader_uniforms.mmodel = Mat4f.I.rotate(zrot, 0.0, 1.0, 0.0);
         {
             try gl.useProgram(shader_prog);
             defer gl.unuseProgram() catch {};

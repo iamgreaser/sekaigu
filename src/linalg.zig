@@ -164,14 +164,12 @@ pub const Mat4f = struct {
 
     pub fn projection(width: T, height: T, znear: T, zfar: T) Self {
         // TODO! --GM
-        _ = znear;
-        _ = zfar;
         return (Self{
             .a = [N * N]T{
-                1.0, 0.0, 0.0, 0.0,
-                0.0, 1.0, 0.0, 0.0,
-                0.0, 0.0, 1.0, 0.0,
-                0.0, 0.0, 0.0, 1.0,
+                1.0, 0.0, 0.0,                                    0.0,
+                0.0, 1.0, 0.0,                                    0.0,
+                0.0, 0.0, -(zfar + znear) / (zfar - znear),       -1.0,
+                0.0, 0.0, -(2.0 * zfar * znear) / (zfar - znear), 0.0,
             },
         }).scale(
             if (width < height) 1.0 else height / width,
