@@ -90,7 +90,7 @@ var model_base = Model(VA_P3F_C3F, u16){
 var shader_uniforms: struct {
     tintcolor: Vec4f = Vec4f.new(.{ 1.0, 0.8, 1.0, 1.0 }),
     mproj: Mat4f = Mat4f.perspective(800.0, 600.0, 0.01, 1000.0),
-    mcam: Mat4f = Mat4f.I.translate(0.5, 0.0, -3.0),
+    mcam: Mat4f = Mat4f.I,
     mmodel: Mat4f = Mat4f.I,
 } = .{};
 const shader_src = shadermagic.makeShaderSource(.{
@@ -103,8 +103,6 @@ const shader_src = shadermagic.makeShaderSource(.{
         \\void main () {
         \\    vcolor = icolor;
         \\    vec4 rpos = ipos;
-        \\    //rpos.xy = (rpos.xy * cos(zrot) + rpos.yx * vec2(1.0, -1.0) * sin(zrot));
-        \\    //rpos.x *= 600.0/800.0;
         \\    rpos = mproj * mcam * mmodel * rpos;
         \\    gl_Position = rpos;
         \\}
@@ -142,11 +140,35 @@ pub fn main() !void {
     // Load the VBOs
     try model_base.load();
 
-    var zrot: f32 = 0.0;
+    var model_zrot: f32 = 0.0;
+    var cam_rot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 });
+    var cam_pos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 });
+    var cam_drot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 0.0 });
+    var cam_dpos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 0.0 });
+    var keys: struct {
+        w: bool = false,
+        a: bool = false,
+        s: bool = false,
+        d: bool = false,
+        LCTRL: bool = false,
+        SPACE: bool = false,
+        LEFT: bool = false,
+        RIGHT: bool = false,
+        UP: bool = false,
+        DOWN: bool = false,
+    } = .{};
     done: while (true) {
+        const dt = 1.0 / 60.0;
         try gl.clearColor(0.2, 0.0, 0.4, 0.0);
         try gl.clear(.{ .color = true, .depth = true });
-        shader_uniforms.mmodel = Mat4f.I.rotate(zrot, 0.0, 1.0, 0.0).rotate(zrot * 2.0, 0.0, 0.0, 1.0);
+        shader_uniforms.mmodel = Mat4f.I
+            .translate(0.5, 0.0, -3.0)
+            .rotate(model_zrot, 0.0, 1.0, 0.0)
+            .rotate(model_zrot * 2.0, 0.0, 0.0, 1.0);
+        shader_uniforms.mcam = Mat4f.I
+            .rotate(cam_rot.a[0], 1.0, 0.0, 0.0)
+            .rotate(cam_rot.a[1], 0.0, 1.0, 0.0)
+            .translate(-cam_pos.a[0], -cam_pos.a[1], -cam_pos.a[2]);
         {
             const had_DepthTest = try gl.isEnabled(.DepthTest);
             const had_CullFace = try gl.isEnabled(.CullFace);
@@ -163,13 +185,55 @@ pub fn main() !void {
         }
 
         gfx.flip();
-        zrot = @mod(zrot + 3.141593 * 2.0 / 3.0 / 60.0, 3.141593 * 2.0);
+        model_zrot = @mod(model_zrot + 3.141593 * 2.0 / 5.0 * dt, 3.141593 * 2.0);
+        cam_dpos = Vec4f.new(.{
+            if (keys.d) @as(f32, 1.0) else @as(f32, 0.0),
+            if (keys.SPACE) @as(f32, 1.0) else @as(f32, 0.0),
+            if (keys.s) @as(f32, 1.0) else @as(f32, 0.0),
+            0.0,
+        }).sub(Vec4f.new(.{
+            if (keys.a) @as(f32, 1.0) else @as(f32, 0.0),
+            if (keys.LCTRL) @as(f32, 1.0) else @as(f32, 0.0),
+            if (keys.w) @as(f32, 1.0) else @as(f32, 0.0),
+            0.0,
+        })).mul(5.0);
+        cam_drot = Vec4f.new(.{
+            if (keys.DOWN) @as(f32, 1.0) else @as(f32, 0.0),
+            if (keys.RIGHT) @as(f32, 1.0) else @as(f32, 0.0),
+            0.0,
+            0.0,
+        }).sub(Vec4f.new(.{
+            if (keys.UP) @as(f32, 1.0) else @as(f32, 0.0),
+            if (keys.LEFT) @as(f32, 1.0) else @as(f32, 0.0),
+            0.0,
+            0.0,
+        })).mul(3.141593); // 180 deg per second
+
+        // TODO: Have a matrix invert function --GM
+        const icam = Mat4f.I
+            .translate(cam_pos.a[0], cam_pos.a[1], cam_pos.a[2])
+            .rotate(-cam_rot.a[1], 0.0, 1.0, 0.0)
+            .rotate(-cam_rot.a[0], 1.0, 0.0, 0.0);
+        cam_pos = cam_pos.add(icam.mul(cam_dpos.mul(dt)));
+        cam_rot = cam_rot.add(cam_drot.mul(dt));
         C.SDL_Delay(10);
         var ev: C.SDL_Event = undefined;
         if (C.SDL_PollEvent(&ev) != 0) {
             switch (ev.type) {
                 C.SDL_QUIT => {
                     break :done;
+                },
+                C.SDL_KEYDOWN, C.SDL_KEYUP => {
+                    const pressed = (ev.type == C.SDL_KEYDOWN);
+                    const code = ev.key.keysym.sym;
+                    gotkey: inline for (@typeInfo(@TypeOf(keys)).Struct.fields) |field| {
+                        if (code == @field(C, "SDLK_" ++ field.name)) {
+                            @field(keys, field.name) = pressed;
+                            break :gotkey;
+                        }
+                    }
+                    //log.debug("key {s} {}", .{ if (pressed) "1" else "0", ev.key.keysym.sym });
+
                 },
                 else => {},
             }

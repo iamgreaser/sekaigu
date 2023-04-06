@@ -9,6 +9,45 @@ fn Vec(comptime N: usize, comptime T: type) type {
         pub fn new(data: [N]T) Self {
             return Self{ .a = data };
         }
+
+        fn buildIdentity() Self {
+            var result = Self{ .a = undefined };
+            for (result.a, 0..) |v, i| {
+                _ = v;
+                result.a[i] = 0.0;
+            }
+            return result;
+        }
+        pub const I = buildIdentity();
+
+        pub fn add(self: Self, other: Self) Self {
+            var result = Self{ .a = undefined };
+            for (0..N) |i| {
+                result.a[i] = self.a[i] + other.a[i];
+            }
+            return result;
+        }
+
+        pub fn sub(self: Self, other: Self) Self {
+            var result = Self{ .a = undefined };
+            for (0..N) |i| {
+                result.a[i] = self.a[i] - other.a[i];
+            }
+            return result;
+        }
+
+        pub fn mul(self: Self, other: anytype) Self {
+            switch (@TypeOf(other)) {
+                f32, f64, comptime_float => {
+                    var result = Self{ .a = undefined };
+                    for (0..N) |i| {
+                        result.a[i] = self.a[i] * other;
+                    }
+                    return result;
+                },
+                else => @compileError("unhandled type for vec mul"),
+            }
+        }
     };
 }
 
@@ -49,18 +88,52 @@ pub const Mat4f = struct {
     }
     pub const I = buildIdentity();
 
-    pub fn mul(self: Self, other: Self) Self {
-        var result = Self{ .a = undefined };
-        for (0..N) |i| {
-            for (0..N) |j| {
-                var total: T = 0.0;
-                for (0..N) |k| {
-                    total += self.a[(k * N) + j] * other.a[(i * N) + k];
+    fn _matmultype(comptime OT: type) type {
+        return switch (OT) {
+            Self => Self,
+            f32, f64, comptime_float => Self,
+            Vec4f => Vec4f,
+            else => @compileError("unhandled type for mat mul"),
+        };
+    }
+    pub fn mul(self: Self, other: anytype) _matmultype(@TypeOf(other)) {
+        switch (@TypeOf(other)) {
+            Self => {
+                var result = Self{ .a = undefined };
+                for (0..N) |i| {
+                    for (0..N) |j| {
+                        var total: T = 0.0;
+                        for (0..N) |k| {
+                            total += self.a[(k * N) + j] * other.a[(i * N) + k];
+                        }
+                        result.a[(i * N) + j] = total;
+                    }
                 }
-                result.a[(i * N) + j] = total;
-            }
+                return result;
+            },
+
+            Vec4f => {
+                var result = Vec4f{ .a = undefined };
+                for (0..N) |i| {
+                    var total: T = 0.0;
+                    for (0..N) |k| {
+                        total += self.a[(k * N) + i] * other.a[k];
+                    }
+                    result.a[i] = total;
+                }
+                return result;
+            },
+
+            f32, f64, comptime_float => {
+                var result = Self{ .a = undefined };
+                for (0..N * N) |i| {
+                    result.a[i] = self.a[i] * other;
+                }
+                return result;
+            },
+
+            else => @compileError("unhandled type for mat mul"),
         }
-        return result;
     }
 
     pub fn add(self: Self, other: Self) Self {
@@ -75,14 +148,6 @@ pub const Mat4f = struct {
         var result = Self{ .a = undefined };
         for (0..N * N) |i| {
             result.a[i] = self.a[i] - other.a[i];
-        }
-        return result;
-    }
-
-    pub fn mulScalar(self: Self, other: T) Self {
-        var result = Self{ .a = undefined };
-        for (0..N * N) |i| {
-            result.a[i] = self.a[i] * other;
         }
         return result;
     }
@@ -144,7 +209,7 @@ pub const Mat4f = struct {
         };
 
         // cos term
-        const mc = (Self.I.sub(mw).sub(mb)).mulScalar(rc);
+        const mc = (Self.I.sub(mw).sub(mb)).mul(rc);
 
         // sin term
         const ms = (Self{
@@ -154,7 +219,7 @@ pub const Mat4f = struct {
                 yn,  -xn, 0.0, 0.0,
                 0.0, 0.0, 0.0, 0.0,
             },
-        }).mulScalar(rs);
+        }).mul(rs);
 
         return mb.add(mc).add(ms).add(mw);
     }
