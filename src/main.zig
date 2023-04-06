@@ -68,17 +68,29 @@ pub fn Model(comptime VAType: type, comptime IdxType: type) type {
 
 var model_base = Model(VA_P3F_C3F, u16){
     .va = &[_]VA_P3F_C3F{
-        .{ .pos = .{ 0.00, 0.99, 0.00 }, .color = .{ 0xFF, 0x80, 0x80 } },
-        .{ .pos = .{ -0.70, -0.50, 0.00 }, .color = .{ 0x80, 0xFF, 0x80 } },
-        .{ .pos = .{ 0.70, -0.50, 0.00 }, .color = .{ 0x80, 0x80, 0xFF } },
+        .{ .pos = .{ -1.0, -1.0, -1.0 }, .color = .{ 0x80, 0x80, 0x80 } },
+        .{ .pos = .{ 1.0, -1.0, -1.0 }, .color = .{ 0xFF, 0x80, 0x80 } },
+        .{ .pos = .{ -1.0, 1.0, -1.0 }, .color = .{ 0x80, 0xFF, 0x80 } },
+        .{ .pos = .{ 1.0, 1.0, -1.0 }, .color = .{ 0xFF, 0xFF, 0x80 } },
+        .{ .pos = .{ -1.0, -1.0, 1.0 }, .color = .{ 0x80, 0x80, 0xFF } },
+        .{ .pos = .{ 1.0, -1.0, 1.0 }, .color = .{ 0xFF, 0x80, 0xFF } },
+        .{ .pos = .{ -1.0, 1.0, 1.0 }, .color = .{ 0x80, 0xFF, 0xFF } },
+        .{ .pos = .{ 1.0, 1.0, 1.0 }, .color = .{ 0xFF, 0xFF, 0xFF } },
     },
-    .idx_list = &[_]u16{ 0, 1, 2 },
+    .idx_list = &[_]u16{
+        0, 2, 1, 1, 2, 3, // Z- Rear
+        4, 5, 6, 6, 5, 7, // Z+ Front
+        0, 4, 2, 2, 4, 6, // X-
+        1, 3, 5, 5, 3, 7, // X+
+        0, 1, 4, 4, 1, 5, // Y-
+        2, 6, 3, 3, 6, 7, // Y+
+    },
 };
 
 var shader_uniforms: struct {
     tintcolor: Vec4f = Vec4f.new(.{ 1.0, 0.8, 1.0, 1.0 }),
     mproj: Mat4f = Mat4f.perspective(800.0, 600.0, 0.01, 1000.0),
-    mcam: Mat4f = Mat4f.I.translate(0.5, 0.0, -1.0),
+    mcam: Mat4f = Mat4f.I.translate(0.5, 0.0, -3.0),
     mmodel: Mat4f = Mat4f.I,
 } = .{};
 const shader_src = shadermagic.makeShaderSource(.{
@@ -134,8 +146,15 @@ pub fn main() !void {
     done: while (true) {
         try gl.clearColor(0.2, 0.0, 0.4, 0.0);
         try gl.clear(.{ .color = true, .depth = true });
-        shader_uniforms.mmodel = Mat4f.I.rotate(zrot, 0.0, 1.0, 0.0);
+        shader_uniforms.mmodel = Mat4f.I.rotate(zrot, 0.0, 1.0, 0.0).rotate(zrot * 2.0, 0.0, 0.0, 1.0);
         {
+            const had_DepthTest = try gl.isEnabled(.DepthTest);
+            const had_CullFace = try gl.isEnabled(.CullFace);
+            defer gl.setEnabled(.DepthTest, had_DepthTest) catch {};
+            defer gl.setEnabled(.CullFace, had_CullFace) catch {};
+            try gl.enable(.DepthTest);
+            try gl.enable(.CullFace);
+
             try gl.useProgram(shader_prog);
             defer gl.unuseProgram() catch {};
             try shadermagic.loadUniforms(shader_prog, @TypeOf(shader_uniforms), &shader_uniforms);

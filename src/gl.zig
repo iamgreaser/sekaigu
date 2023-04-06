@@ -163,3 +163,33 @@ pub fn clear(clear_options: ClearOptions) !void {
     C.glClear(clear_mask);
     try _TestError();
 }
+
+pub const EnableTypes = enum(C.GLenum) {
+    CullFace = C.GL_CULL_FACE,
+    DepthTest = C.GL_DEPTH_TEST,
+};
+pub fn enable(t: EnableTypes) !void {
+    C.glEnable(@enumToInt(t));
+    try _TestError();
+}
+pub fn disable(t: EnableTypes) !void {
+    C.glDisable(@enumToInt(t));
+    try _TestError();
+}
+pub fn isEnabled(t: EnableTypes) !bool {
+    const result = switch (C.glIsEnabled(@enumToInt(t))) {
+        C.GL_FALSE => false,
+        C.GL_TRUE => false,
+        else => @panic("driver broke and returned invalid boolean for glIsEnabled"),
+    };
+    try _TestError();
+    return result;
+}
+
+pub fn setEnabled(t: EnableTypes, state: bool) !void {
+    if (state) {
+        try enable(t);
+    } else {
+        try disable(t);
+    }
+}
