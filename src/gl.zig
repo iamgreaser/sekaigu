@@ -165,8 +165,15 @@ pub fn clear(clear_options: ClearOptions) !void {
 }
 
 pub const EnableTypes = enum(C.GLenum) {
+    Blend = C.GL_BLEND,
     CullFace = C.GL_CULL_FACE,
     DepthTest = C.GL_DEPTH_TEST,
+    Dither = C.GL_DITHER,
+    PolygonOffsetFill = C.GL_POLYGON_OFFSET_FILL,
+    SampleAlphaToCoverage = C.GL_SAMPLE_ALPHA_TO_COVERAGE,
+    SampleCoverage = C.GL_SAMPLE_COVERAGE,
+    ScissorTest = C.GL_SCISSOR_TEST,
+    StencilTest = C.GL_STENCIL_TEST,
 };
 pub fn enable(t: EnableTypes) !void {
     C.glEnable(@enumToInt(t));
