@@ -76,10 +76,9 @@ var model_base = Model(VA_P3F_C3F, u16){
 };
 
 var shader_uniforms: struct {
-    zrot: f32 = 0.0,
     tintcolor: Vec4f = Vec4f.new(.{ 1.0, 0.8, 1.0, 1.0 }),
-    mproj: Mat4f = Mat4f.I,
-    mcam: Mat4f = Mat4f.I,
+    mproj: Mat4f = Mat4f.projection(800.0, 600.0, 0.01, 1000.0),
+    mcam: Mat4f = Mat4f.I.translate(0.5, 0.0, -1.0),
     mmodel: Mat4f = Mat4f.I,
 } = .{};
 const shader_src = shadermagic.makeShaderSource(.{
@@ -92,8 +91,9 @@ const shader_src = shadermagic.makeShaderSource(.{
         \\void main () {
         \\    vcolor = icolor;
         \\    vec4 rpos = ipos;
-        \\    rpos.xy = (rpos.xy * cos(zrot) + rpos.yx * vec2(1.0, -1.0) * sin(zrot));
-        \\    rpos.x *= 600.0/800.0;
+        \\    //rpos.xy = (rpos.xy * cos(zrot) + rpos.yx * vec2(1.0, -1.0) * sin(zrot));
+        \\    //rpos.x *= 600.0/800.0;
+        \\    rpos = mproj * mcam * mmodel * rpos;
         \\    gl_Position = rpos;
         \\}
     ),
@@ -130,9 +130,11 @@ pub fn main() !void {
     // Load the VBOs
     try model_base.load();
 
+    var zrot: f32 = 0.0;
     done: while (true) {
         try gl.clearColor(0.2, 0.0, 0.4, 0.0);
         try gl.clear(.{ .color = true, .depth = true });
+        shader_uniforms.mmodel = Mat4f.I.rotate(zrot, 0.0, 0.0, -2.0);
         {
             try gl.useProgram(shader_prog);
             defer gl.unuseProgram() catch {};
@@ -142,7 +144,7 @@ pub fn main() !void {
         }
 
         gfx.flip();
-        shader_uniforms.zrot = @mod(shader_uniforms.zrot + 3.141593 * 2.0 / 3.0 / 60.0, 3.141593 * 2.0);
+        zrot = @mod(zrot + 3.141593 * 2.0 / 3.0 / 60.0, 3.141593 * 2.0);
         C.SDL_Delay(10);
         var ev: C.SDL_Event = undefined;
         if (C.SDL_PollEvent(&ev) != 0) {
