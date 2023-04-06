@@ -77,7 +77,7 @@ var model_base = Model(VA_P3F_C3F, u16){
 
 var shader_uniforms: struct {
     tintcolor: Vec4f = Vec4f.new(.{ 1.0, 0.8, 1.0, 1.0 }),
-    mproj: Mat4f = Mat4f.projection(800.0, 600.0, 0.01, 1000.0),
+    mproj: Mat4f = Mat4f.perspective(800.0, 600.0, 0.01, 1000.0),
     mcam: Mat4f = Mat4f.I.translate(0.5, 0.0, -1.0),
     mmodel: Mat4f = Mat4f.I,
 } = .{};

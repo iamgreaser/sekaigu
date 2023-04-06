@@ -162,7 +162,7 @@ pub const Mat4f = struct {
         return self.mul(genRotate(ang, x, y, z));
     }
 
-    pub fn projection(width: T, height: T, znear: T, zfar: T) Self {
+    pub fn perspective(width: T, height: T, znear: T, zfar: T) Self {
         // TODO! --GM
         return (Self{
             .a = [N * N]T{
