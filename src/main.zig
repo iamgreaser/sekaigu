@@ -17,6 +17,12 @@ const Mat4f = linalg.Mat4f;
 const MAX_FPS = 60;
 const NSEC_PER_FRAME = @divFloor(time.ns_per_s, MAX_FPS);
 
+pub const VA_P4HF_T3HF_N3F = struct {
+    pos: [4]f32,
+    tex0: [3]f32,
+    normal: [3]i8,
+};
+
 pub const VA_P3F_C3U8_N3I8 = struct {
     pos: [3]f32,
     color: [3]u8,
@@ -70,6 +76,22 @@ pub fn Model(comptime VAType: type, comptime IdxType: type) type {
         }
     };
 }
+
+var model_floor = Model(VA_P4HF_T3HF_N3F, u16){
+    .va = &[_]VA_P4HF_T3HF_N3F{
+        .{ .pos = .{ 0.0, 0.0, 0.0, 1.0 }, .tex0 = .{ 0.0, 0.0, 1.0 }, .normal = .{ 0.0, 1.0, 0.0 } },
+        .{ .pos = .{ -1.0, 0.0, -1.0, 0.0 }, .tex0 = .{ -1.0, -1.0, 0.0 }, .normal = .{ 0.0, 1.0, 0.0 } },
+        .{ .pos = .{ -1.0, 0.0, 1.0, 0.0 }, .tex0 = .{ -1.0, 1.0, 0.0 }, .normal = .{ 0.0, 1.0, 0.0 } },
+        .{ .pos = .{ 1.0, 0.0, 1.0, 0.0 }, .tex0 = .{ 1.0, 1.0, 0.0 }, .normal = .{ 0.0, 1.0, 0.0 } },
+        .{ .pos = .{ 1.0, 0.0, -1.0, 0.0 }, .tex0 = .{ 1.0, -1.0, 0.0 }, .normal = .{ 0.0, 1.0, 0.0 } },
+    },
+    .idx_list = &[_]u16{
+        0, 1, 2,
+        0, 2, 3,
+        0, 3, 4,
+        0, 4, 1,
+    },
+};
 
 var model_base = Model(VA_P3F_C3U8_N3I8, u16){
     .va = &[_]VA_P3F_C3U8_N3I8{
@@ -165,16 +187,61 @@ const shader_src = shadermagic.makeShaderSource(.{
 });
 var shader_prog: gl.Program = gl.Program.Dummy;
 
+const floor_shader_src = shadermagic.makeShaderSource(.{
+    .uniform_type = @TypeOf(shader_uniforms),
+    .attrib_type = VA_P4HF_T3HF_N3F,
+    .varyings = &[_]shadermagic.MakeShaderSourceOptions.FieldEntry{
+        .{ "vec3", "vtex0" },
+        .{ "vec4", "vwpos" },
+        .{ "vec3", "vspos" },
+        .{ "vec3", "vnormal" },
+    },
+    .vert = (
+        \\void main () {
+        \\    vtex0 = itex0.xyz;
+        \\    vec4 rwpos = mmodel * ipos;
+        \\    vec4 rspos = mcam * rwpos;
+        \\    vec4 rpos = mproj * rspos;
+        \\    vec4 rnormal = vec4(normalize(inormal.xyz), 0.0);
+        \\    vwpos = rwpos;
+        \\    vspos = rspos.xyz;
+        \\    vnormal = (mmodel * rnormal).xyz;
+        \\    gl_Position = rpos;
+        \\}
+    ),
+    .frag = (
+        \\void main () {
+        \\    const vec3 Ma = vec3(0.1);
+        \\    const vec3 Md = vec3(0.9);
+        \\    const vec3 Ms = vec3(0.8);
+        \\    const float MsExp = 64.0;
+        \\    vec3 wpos = vwpos.xyz/vwpos.w;
+        \\    vec2 tex0 = mod(vtex0.xy/vtex0.z, 1.0);
+        \\    vec4 vcolor = vec4(vec3((tex0.x < 0.5 == tex0.y < 0.5) ? 1.0 : 0.1), 0.0);
+        \\    vec3 normal = normalize(vnormal);
+        \\    vec3 vlightdir = normalize(light.xyz - wpos);
+        \\    vec3 ambdiff = Ma + Md*max(0.0, dot(vlightdir, normal));
+        \\    vec3 vcamdir = -normalize(vspos);
+        \\    vec3 vspecdir = 2.0*normal*dot(normal, vlightdir) - vlightdir;
+        \\    vec3 spec = Ms*pow(max(0.0, dot(vcamdir, vspecdir)), MsExp);
+        \\    gl_FragColor = vec4((vcolor.rgb*ambdiff)+spec, vcolor.a);
+        \\}
+    ),
+});
+var floor_shader_prog: gl.Program = gl.Program.Dummy;
+
 pub fn main() !void {
     var gfx = try GfxContext.new();
     try gfx.init();
     defer gfx.free();
 
-    // Compile the shader
+    // Compile the shaders
     shader_prog = try shader_src.compileProgram();
+    floor_shader_prog = try floor_shader_src.compileProgram();
 
     // Load the VBOs
     try model_base.load();
+    try model_floor.load();
 
     var model_zrot: f32 = 0.0;
     var cam_rot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 });
@@ -204,10 +271,6 @@ pub fn main() !void {
         fps_counter += 1;
         try gl.clearColor(0.2, 0.0, 0.4, 0.0);
         try gl.clear(.{ .color = true, .depth = true });
-        shader_uniforms.mmodel = Mat4f.I
-            .translate(0.5, 0.0, -3.0)
-            .rotate(model_zrot, 0.0, 1.0, 0.0)
-            .rotate(model_zrot * 2.0, 0.0, 0.0, 1.0);
         shader_uniforms.mcam = Mat4f.I
             .rotate(cam_rot.a[0], 1.0, 0.0, 0.0)
             .rotate(cam_rot.a[1], 0.0, 1.0, 0.0)
@@ -221,11 +284,26 @@ pub fn main() !void {
             try gl.enable(.DepthTest);
             try gl.enable(.CullFace);
 
-            try gl.useProgram(shader_prog);
-            defer gl.unuseProgram() catch {};
-            try shadermagic.loadUniforms(shader_prog, @TypeOf(shader_uniforms), &shader_uniforms);
+            {
+                try gl.useProgram(shader_prog);
+                defer gl.unuseProgram() catch {};
+                shader_uniforms.mmodel = Mat4f.I
+                    .translate(0.5, 0.0, -3.0)
+                    .rotate(model_zrot, 0.0, 1.0, 0.0)
+                    .rotate(model_zrot * 2.0, 0.0, 0.0, 1.0);
+                try shadermagic.loadUniforms(shader_prog, @TypeOf(shader_uniforms), &shader_uniforms);
+                try model_base.draw(.Triangles);
+            }
 
-            try model_base.draw(.Triangles);
+            {
+                //try gl.disable(.CullFace);
+                try gl.useProgram(floor_shader_prog);
+                defer gl.unuseProgram() catch {};
+                shader_uniforms.mmodel = Mat4f.I
+                    .translate(0.0, -2.0, 0.0);
+                try shadermagic.loadUniforms(floor_shader_prog, @TypeOf(shader_uniforms), &shader_uniforms);
+                try model_floor.draw(.Triangles);
+            }
         }
 
         gfx.flip();
