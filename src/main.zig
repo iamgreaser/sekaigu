@@ -17,9 +17,10 @@ const Mat4f = linalg.Mat4f;
 const MAX_FPS = 60;
 const NSEC_PER_FRAME = @divFloor(time.ns_per_s, MAX_FPS);
 
-pub const VA_P3F_C3F = struct {
+pub const VA_P3F_C3U8_N3I8 = struct {
     pos: [3]f32,
     color: [3]u8,
+    normal: [3]i8,
 };
 
 pub fn Model(comptime VAType: type, comptime IdxType: type) type {
@@ -70,50 +71,95 @@ pub fn Model(comptime VAType: type, comptime IdxType: type) type {
     };
 }
 
-var model_base = Model(VA_P3F_C3F, u16){
-    .va = &[_]VA_P3F_C3F{
-        .{ .pos = .{ -1.0, -1.0, -1.0 }, .color = .{ 0x80, 0x80, 0x80 } },
-        .{ .pos = .{ 1.0, -1.0, -1.0 }, .color = .{ 0xFF, 0x80, 0x80 } },
-        .{ .pos = .{ -1.0, 1.0, -1.0 }, .color = .{ 0x80, 0xFF, 0x80 } },
-        .{ .pos = .{ 1.0, 1.0, -1.0 }, .color = .{ 0xFF, 0xFF, 0x80 } },
-        .{ .pos = .{ -1.0, -1.0, 1.0 }, .color = .{ 0x80, 0x80, 0xFF } },
-        .{ .pos = .{ 1.0, -1.0, 1.0 }, .color = .{ 0xFF, 0x80, 0xFF } },
-        .{ .pos = .{ -1.0, 1.0, 1.0 }, .color = .{ 0x80, 0xFF, 0xFF } },
-        .{ .pos = .{ 1.0, 1.0, 1.0 }, .color = .{ 0xFF, 0xFF, 0xFF } },
+var model_base = Model(VA_P3F_C3U8_N3I8, u16){
+    .va = &[_]VA_P3F_C3U8_N3I8{
+        // Z- Rear
+        .{ .pos = .{ -1.0, -1.0, -1.0 }, .color = .{ 0x80, 0x80, 0x80 }, .normal = .{ 0, 0, -128 } },
+        .{ .pos = .{ -1.0, 1.0, -1.0 }, .color = .{ 0x80, 0xFF, 0x80 }, .normal = .{ 0, 0, -128 } },
+        .{ .pos = .{ 1.0, -1.0, -1.0 }, .color = .{ 0xFF, 0x80, 0x80 }, .normal = .{ 0, 0, -128 } },
+        .{ .pos = .{ 1.0, 1.0, -1.0 }, .color = .{ 0xFF, 0xFF, 0x80 }, .normal = .{ 0, 0, -128 } },
+        // Z+ Front
+        .{ .pos = .{ -1.0, -1.0, 1.0 }, .color = .{ 0x80, 0x80, 0xFF }, .normal = .{ 0, 0, 127 } },
+        .{ .pos = .{ 1.0, -1.0, 1.0 }, .color = .{ 0xFF, 0x80, 0xFF }, .normal = .{ 0, 0, 127 } },
+        .{ .pos = .{ -1.0, 1.0, 1.0 }, .color = .{ 0x80, 0xFF, 0xFF }, .normal = .{ 0, 0, 127 } },
+        .{ .pos = .{ 1.0, 1.0, 1.0 }, .color = .{ 0xFF, 0xFF, 0xFF }, .normal = .{ 0, 0, 127 } },
+        // X-
+        .{ .pos = .{ -1.0, -1.0, -1.0 }, .color = .{ 0x80, 0x80, 0x80 }, .normal = .{ -128, 0, 0 } },
+        .{ .pos = .{ -1.0, -1.0, 1.0 }, .color = .{ 0x80, 0x80, 0xFF }, .normal = .{ -128, 0, 0 } },
+        .{ .pos = .{ -1.0, 1.0, -1.0 }, .color = .{ 0x80, 0xFF, 0x80 }, .normal = .{ -128, 0, 0 } },
+        .{ .pos = .{ -1.0, 1.0, 1.0 }, .color = .{ 0x80, 0xFF, 0xFF }, .normal = .{ -128, 0, 0 } },
+        // X+
+        .{ .pos = .{ 1.0, -1.0, -1.0 }, .color = .{ 0xFF, 0x80, 0x80 }, .normal = .{ 127, 0, 0 } },
+        .{ .pos = .{ 1.0, 1.0, -1.0 }, .color = .{ 0xFF, 0xFF, 0x80 }, .normal = .{ 127, 0, 0 } },
+        .{ .pos = .{ 1.0, -1.0, 1.0 }, .color = .{ 0xFF, 0x80, 0xFF }, .normal = .{ 127, 0, 0 } },
+        .{ .pos = .{ 1.0, 1.0, 1.0 }, .color = .{ 0xFF, 0xFF, 0xFF }, .normal = .{ 127, 0, 0 } },
+        // Y-
+        .{ .pos = .{ -1.0, -1.0, -1.0 }, .color = .{ 0x80, 0x80, 0x80 }, .normal = .{ 0, -128, 0 } },
+        .{ .pos = .{ 1.0, -1.0, -1.0 }, .color = .{ 0xFF, 0x80, 0x80 }, .normal = .{ 0, -128, 0 } },
+        .{ .pos = .{ -1.0, -1.0, 1.0 }, .color = .{ 0x80, 0x80, 0xFF }, .normal = .{ 0, -128, 0 } },
+        .{ .pos = .{ 1.0, -1.0, 1.0 }, .color = .{ 0xFF, 0x80, 0xFF }, .normal = .{ 0, -128, 0 } },
+        // Y+
+        .{ .pos = .{ -1.0, 1.0, -1.0 }, .color = .{ 0x80, 0xFF, 0x80 }, .normal = .{ 0, 127, 0 } },
+        .{ .pos = .{ -1.0, 1.0, 1.0 }, .color = .{ 0x80, 0xFF, 0xFF }, .normal = .{ 0, 127, 0 } },
+        .{ .pos = .{ 1.0, 1.0, -1.0 }, .color = .{ 0xFF, 0xFF, 0x80 }, .normal = .{ 0, 127, 0 } },
+        .{ .pos = .{ 1.0, 1.0, 1.0 }, .color = .{ 0xFF, 0xFF, 0xFF }, .normal = .{ 0, 127, 0 } },
     },
     .idx_list = &[_]u16{
-        0, 2, 1, 1, 2, 3, // Z- Rear
-        4, 5, 6, 6, 5, 7, // Z+ Front
-        0, 4, 2, 2, 4, 6, // X-
-        1, 3, 5, 5, 3, 7, // X+
-        0, 1, 4, 4, 1, 5, // Y-
-        2, 6, 3, 3, 6, 7, // Y+
+        0,  1,  2,  2,  1,  3,
+        4,  5,  6,  6,  5,  7,
+        8,  9,  10, 10, 9,  11,
+        12, 13, 14, 14, 13, 15,
+        16, 17, 18, 18, 17, 19,
+        20, 21, 22, 22, 21, 23,
     },
 };
 
 var shader_uniforms: struct {
-    tintcolor: Vec4f = Vec4f.new(.{ 1.0, 0.8, 1.0, 1.0 }),
     mproj: Mat4f = Mat4f.perspective(800.0, 600.0, 0.01, 1000.0),
     mcam: Mat4f = Mat4f.I,
     mmodel: Mat4f = Mat4f.I,
+    light: Vec4f = Vec4f.new(.{ 0.0, 2.0, 0.0, 1.0 }),
 } = .{};
 const shader_src = shadermagic.makeShaderSource(.{
     .uniform_type = @TypeOf(shader_uniforms),
-    .attrib_type = VA_P3F_C3F,
+    .attrib_type = VA_P3F_C3U8_N3I8,
     .varyings = &[_]shadermagic.MakeShaderSourceOptions.FieldEntry{
         .{ "vec4", "vcolor" },
+        .{ "vec3", "vwpos" },
+        .{ "vec3", "vspos" },
+        .{ "vec3", "vnormal" },
     },
     .vert = (
+        \\vec3 vec3zeroclamp (vec3 v) {
+        \\    const float CLAMPTHRESH = 1.0/126.0;
+        \\    return sign(v)*max(abs(v)-CLAMPTHRESH,0.0)/(1.0-CLAMPTHRESH);
+        \\}
+        \\
         \\void main () {
         \\    vcolor = icolor;
-        \\    vec4 rpos = ipos;
-        \\    rpos = mproj * mcam * mmodel * rpos;
+        \\    vec4 rwpos = mmodel * ipos;
+        \\    vec4 rspos = mcam * rwpos;
+        \\    vec4 rpos = mproj * rspos;
+        \\    vec4 rnormal = vec4(normalize(vec3zeroclamp(inormal.xyz)), 0.0);
+        \\    vwpos = rwpos.xyz;
+        \\    vspos = rwpos.xyz;
+        \\    vnormal = (mmodel * rnormal).xyz;
         \\    gl_Position = rpos;
         \\}
     ),
     .frag = (
         \\void main () {
-        \\    gl_FragColor = vcolor * tintcolor;
+        \\    const vec3 Ma = vec3(0.1);
+        \\    const vec3 Md = vec3(0.9);
+        \\    const vec3 Ms = vec3(0.8);
+        \\    const float MsExp = 64.0;
+        \\    vec3 normal = normalize(vnormal);
+        \\    vec3 vlightdir = normalize(light.xyz - vwpos);
+        \\    vec3 ambdiff = Ma + Md*max(0.0, dot(vlightdir, normal));
+        \\    vec3 vcamdir = -normalize(vspos);
+        \\    vec3 vspecdir = 2.0*normal*dot(normal, vlightdir) - vlightdir;
+        \\    vec3 spec = Ms*pow(max(0.0, dot(vcamdir, vspecdir)), MsExp);
+        \\    gl_FragColor = vec4((vcolor.rgb*ambdiff)+spec, vcolor.a);
         \\}
     ),
 });
@@ -166,6 +212,7 @@ pub fn main() !void {
             .rotate(cam_rot.a[0], 1.0, 0.0, 0.0)
             .rotate(cam_rot.a[1], 0.0, 1.0, 0.0)
             .translate(-cam_pos.a[0], -cam_pos.a[1], -cam_pos.a[2]);
+        shader_uniforms.light = cam_pos;
         {
             const had_DepthTest = try gl.isEnabled(.DepthTest);
             const had_CullFace = try gl.isEnabled(.CullFace);
