@@ -17,9 +17,9 @@ const Mat4f = linalg.Mat4f;
 const MAX_FPS = 60;
 const NSEC_PER_FRAME = @divFloor(time.ns_per_s, MAX_FPS);
 
-pub const VA_P4HF_T3HF_N3F = struct {
+pub const VA_P4HF_T2F_N3F = struct {
     pos: [4]f32,
-    tex0: [3]f32,
+    tex0: [2]f32,
     normal: [3]i8,
 };
 
@@ -77,13 +77,13 @@ pub fn Model(comptime VAType: type, comptime IdxType: type) type {
     };
 }
 
-var model_floor = Model(VA_P4HF_T3HF_N3F, u16){
-    .va = &[_]VA_P4HF_T3HF_N3F{
-        .{ .pos = .{ 0.0, 0.0, 0.0, 1.0 }, .tex0 = .{ 0.0, 0.0, 1.0 }, .normal = .{ 0.0, 1.0, 0.0 } },
-        .{ .pos = .{ -1.0, 0.0, -1.0, 0.0 }, .tex0 = .{ -1.0, -1.0, 0.0 }, .normal = .{ 0.0, 1.0, 0.0 } },
-        .{ .pos = .{ -1.0, 0.0, 1.0, 0.0 }, .tex0 = .{ -1.0, 1.0, 0.0 }, .normal = .{ 0.0, 1.0, 0.0 } },
-        .{ .pos = .{ 1.0, 0.0, 1.0, 0.0 }, .tex0 = .{ 1.0, 1.0, 0.0 }, .normal = .{ 0.0, 1.0, 0.0 } },
-        .{ .pos = .{ 1.0, 0.0, -1.0, 0.0 }, .tex0 = .{ 1.0, -1.0, 0.0 }, .normal = .{ 0.0, 1.0, 0.0 } },
+var model_floor = Model(VA_P4HF_T2F_N3F, u16){
+    .va = &[_]VA_P4HF_T2F_N3F{
+        .{ .pos = .{ 0.0, 0.0, 0.0, 1.0 }, .tex0 = .{ 0.0, 0.0 }, .normal = .{ 0.0, 1.0, 0.0 } },
+        .{ .pos = .{ -1.0, 0.0, -1.0, 0.0 }, .tex0 = .{ -1.0, -1.0 }, .normal = .{ 0.0, 1.0, 0.0 } },
+        .{ .pos = .{ -1.0, 0.0, 1.0, 0.0 }, .tex0 = .{ -1.0, 1.0 }, .normal = .{ 0.0, 1.0, 0.0 } },
+        .{ .pos = .{ 1.0, 0.0, 1.0, 0.0 }, .tex0 = .{ 1.0, 1.0 }, .normal = .{ 0.0, 1.0, 0.0 } },
+        .{ .pos = .{ 1.0, 0.0, -1.0, 0.0 }, .tex0 = .{ 1.0, -1.0 }, .normal = .{ 0.0, 1.0, 0.0 } },
     },
     .idx_list = &[_]u16{
         0, 1, 2,
@@ -189,22 +189,22 @@ var shader_prog: gl.Program = gl.Program.Dummy;
 
 const floor_shader_src = shadermagic.makeShaderSource(.{
     .uniform_type = @TypeOf(shader_uniforms),
-    .attrib_type = VA_P4HF_T3HF_N3F,
+    .attrib_type = VA_P4HF_T2F_N3F,
     .varyings = &[_]shadermagic.MakeShaderSourceOptions.FieldEntry{
-        .{ "vec3", "vtex0" },
+        .{ "vec2", "vtex0" },
         .{ "vec4", "vwpos" },
         .{ "vec3", "vspos" },
         .{ "vec3", "vnormal" },
     },
     .vert = (
         \\void main () {
-        \\    vtex0 = itex0.xyz;
+        \\    vtex0 = itex0.st;
         \\    vec4 rwpos = mmodel * ipos;
         \\    vec4 rspos = mcam * rwpos;
         \\    vec4 rpos = mproj * rspos;
         \\    vec4 rnormal = vec4(normalize(inormal.xyz), 0.0);
         \\    vwpos = rwpos;
-        \\    vspos = rspos.xyz;
+        \\    vspos = rspos.xyz/rspos.w;
         \\    vnormal = (mmodel * rnormal).xyz;
         \\    gl_Position = rpos;
         \\}
@@ -216,7 +216,7 @@ const floor_shader_src = shadermagic.makeShaderSource(.{
         \\    const vec3 Ms = vec3(0.8);
         \\    const float MsExp = 64.0;
         \\    vec3 wpos = vwpos.xyz/vwpos.w;
-        \\    vec2 tex0 = mod(vtex0.xy/vtex0.z, 1.0);
+        \\    vec2 tex0 = mod(vtex0/vwpos.w, 1.0);
         \\    vec4 vcolor = vec4(vec3((tex0.x < 0.5 == tex0.y < 0.5) ? 1.0 : 0.1), 0.0);
         \\    vec3 normal = normalize(vnormal);
         \\    vec3 vlightdir = normalize(light.xyz - wpos);
