@@ -75,6 +75,10 @@ pub fn init(self: *Self) anyerror!void {
     _ = C.glGetError();
 }
 
+pub fn setTitle(self: *Self, title: [:0]const u8) void {
+    C.SDL_SetWindowTitle(self.window, title);
+}
+
 pub fn free(self: *Self) void {
     //
     if (self.gl_context) |g| {

@@ -1,5 +1,6 @@
 const std = @import("std");
 const log = std.log.scoped(.main);
+const time = std.time;
 const C = @import("c.zig");
 
 const GfxContext = @import("GfxContext.zig");
@@ -12,6 +13,9 @@ const Vec4f = linalg.Vec4f;
 const Mat2f = linalg.Mat2f;
 const Mat3f = linalg.Mat3f;
 const Mat4f = linalg.Mat4f;
+
+const MAX_FPS = 60;
+const NSEC_PER_FRAME = @divFloor(time.ns_per_s, MAX_FPS);
 
 pub const VA_P3F_C3F = struct {
     pos: [3]f32,
@@ -143,8 +147,15 @@ pub fn main() !void {
         UP: bool = false,
         DOWN: bool = false,
     } = .{};
+
+    var timer = try time.Timer.start();
+    var time_accum: u64 = 0;
+    var frame_time_accum: i64 = 0;
+    var fps_time_accum: u64 = 0;
+    var fps_counter: u64 = 0;
+    var dt: f32 = 0.0;
     done: while (true) {
-        const dt = 1.0 / 60.0;
+        fps_counter += 1;
         try gl.clearColor(0.2, 0.0, 0.4, 0.0);
         try gl.clear(.{ .color = true, .depth = true });
         shader_uniforms.mmodel = Mat4f.I
@@ -202,9 +213,8 @@ pub fn main() !void {
             .rotate(-cam_rot.a[0], 1.0, 0.0, 0.0);
         cam_pos = cam_pos.add(icam.mul(cam_dpos.mul(dt)));
         cam_rot = cam_rot.add(cam_drot.mul(dt));
-        C.SDL_Delay(10);
         var ev: C.SDL_Event = undefined;
-        if (C.SDL_PollEvent(&ev) != 0) {
+        while (C.SDL_PollEvent(&ev) != 0) {
             switch (ev.type) {
                 C.SDL_QUIT => {
                     break :done;
@@ -224,5 +234,32 @@ pub fn main() !void {
                 else => {},
             }
         }
+        frame_time_accum += NSEC_PER_FRAME;
+        const sleep_time = frame_time_accum - @intCast(i64, timer.read());
+        if (sleep_time > 0) {
+            time.sleep(@intCast(u64, sleep_time));
+        }
+        const dt_snap = timer.lap();
+        time_accum += dt_snap;
+        fps_time_accum += dt_snap;
+        frame_time_accum -= @intCast(i64, dt_snap);
+        if (frame_time_accum < 0) {
+            // Seems we can't achieve the given rendering FPS.
+            frame_time_accum = 0;
+        }
+
+        if (fps_time_accum >= (time.ns_per_s * 1)) {
+            {
+                //log.debug("FPS: {}", .{fps_counter});
+                var buf: [128]u8 = undefined;
+                gfx.setTitle(try std.fmt.bufPrintZ(&buf, "cockel pre-alpha | FPS: {}", .{fps_counter}));
+            }
+            if (fps_time_accum >= (time.ns_per_s * 1) * 2) {
+                log.warn("FPS counter slipped! Time wasted (nsec): {}", .{fps_time_accum});
+            }
+            fps_time_accum %= (time.ns_per_s * 1);
+            fps_counter = 0;
+        }
+        dt = @floatCast(f32, @intToFloat(f64, dt_snap) / @intToFloat(f64, time.ns_per_s * 1));
     }
 }
