@@ -142,7 +142,7 @@ const shader_src = shadermagic.makeShaderSource(.{
         \\    vec4 rpos = mproj * rspos;
         \\    vec4 rnormal = vec4(normalize(vec3zeroclamp(inormal.xyz)), 0.0);
         \\    vwpos = rwpos.xyz;
-        \\    vspos = rwpos.xyz;
+        \\    vspos = rspos.xyz;
         \\    vnormal = (mmodel * rnormal).xyz;
         \\    gl_Position = rpos;
         \\}
