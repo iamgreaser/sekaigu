@@ -220,7 +220,7 @@ const floor_shader_src = shadermagic.makeShaderSource(.{
         \\    const vec3 Ms = vec3(0.8);
         \\    const float MsExp = 64.0;
         \\    vec3 wpos = vwpos.xyz/vwpos.w;
-        \\    vec2 tex0 = mod(vtex0/vwpos.w, 1.0);
+        \\    vec2 tex0 = vtex0/vwpos.w;
         \\    vec4 vcolor = texture2D(smp0, tex0);
         \\    vec3 normal = normalize(vnormal);
         \\    vec3 vlightdir = normalize(light.xyz - wpos*light.w);
@@ -248,13 +248,15 @@ pub fn main() !void {
     // Generate a test texture
     test_tex = try gl.Texture2D.genTexture();
     {
-        const SHIFT = 6;
+        const SHIFT = 8;
         const SIZE = 1 << SHIFT;
         var buf: [SIZE * SIZE]u32 = undefined;
-        for (0..SIZE - 1) |y| {
-            for (0..SIZE - 1) |x| {
-                var v: u32 = (@intCast(u32, x ^ y)) << (8 - SHIFT);
-                if (SHIFT < 8) v |= (v >> SHIFT);
+        for (0..SIZE) |y| {
+            for (0..SIZE) |x| {
+                //var v: u32 = (@intCast(u32, x ^ y)) << (8 - SHIFT);
+                //if (SHIFT < 8) v |= (v >> SHIFT);
+                //var v: u32 = if ((x >= (SIZE >> 1)) == (y >= (SIZE >> 1))) 0xFF else 0x10;
+                var v: u32 = if ((x < 8) or (y < 8) or (((x * 5) % SIZE) < 3 * 5) or (((y * 5) % SIZE) < 3 * 5)) 0x10 else 0xFF;
                 v *= 0x00010101;
                 v &= 0x00FFFFFF;
                 v |= 0xFF000000;
@@ -274,6 +276,9 @@ pub fn main() !void {
         C.glTexParameteri(C.GL_TEXTURE_2D, C.GL_TEXTURE_WRAP_T, C.GL_REPEAT);
         C.glTexParameteri(C.GL_TEXTURE_2D, C.GL_TEXTURE_MAG_FILTER, C.GL_NEAREST);
         C.glTexParameteri(C.GL_TEXTURE_2D, C.GL_TEXTURE_MIN_FILTER, C.GL_LINEAR_MIPMAP_LINEAR);
+        //C.glTexParameteri(C.GL_TEXTURE_2D, C.GL_TEXTURE_MIN_FILTER, C.GL_NEAREST);
+        // TODO: Detect the GL_EXT_texture_filter_anisotropic extension --GM
+        C.glTexParameteri(C.GL_TEXTURE_2D, C.GL_TEXTURE_MAX_ANISOTROPY_EXT, 16);
         try gl._TestError();
         try gl.Texture2D.texImage2D(0, SIZE, SIZE, .RGBA8888, &buf);
         try gl.Texture2D.generateMipmap();
