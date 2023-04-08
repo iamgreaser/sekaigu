@@ -119,7 +119,10 @@ pub fn vertexAttribPointer(idx: C.GLuint, comptime ptr_type: type, comptime fiel
             },
         },
         @sizeOf(ptr_type),
-        &(@field(@intToPtr(*allowzero ptr_type, 0), field_name)),
+        if (comptime builtin.target.isWasm())
+            @intCast(C.GLintptr, @offsetOf(ptr_type, field_name))
+        else
+            &(@field(@intToPtr(*allowzero ptr_type, 0), field_name)),
     );
     try _TestError();
 }
@@ -154,7 +157,10 @@ pub fn drawElements(mode: DrawMode, first: usize, count: usize, comptime elem_ty
                 @compileError("unhandled element index type");
             },
         },
-        @intToPtr(*allowzero anyopaque, first * @sizeOf(elem_type)),
+        if (comptime builtin.target.isWasm())
+            @intCast(C.GLintptr, first * @sizeOf(elem_type))
+        else
+            @intToPtr(*allowzero anyopaque, first * @sizeOf(elem_type)),
     );
     try _TestError();
 }

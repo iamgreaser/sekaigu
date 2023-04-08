@@ -22,7 +22,9 @@ function wrap_string (sptr) {
   const buf = new Uint8Array(memory.buffer, sptr);
   for (var i = 0; i < maxlen; i++) {
     if (buf[i] == 0) {
-      return new TextDecoder("utf-8").decode(new Uint8Array(memory.buffer, sptr, i));
+      const result = new TextDecoder("utf-8").decode(new Uint8Array(memory.buffer, sptr, i));
+      //console.log("Wrapped string: <<<" + result + ">>>");
+      return result;
     }
   }
   return null; // FIXME: No NUL terminator - needs to throw an error --GM
@@ -30,7 +32,9 @@ function wrap_string (sptr) {
 
 function wrap_data (basetype, dptr, len) {
   //return new TextDecoder("utf-8").decode(new Uint8Array(memory.buffer, dptr, size));
-  return new basetype(memory.buffer, dptr, len);
+  const result = new basetype(memory.buffer, dptr, len);
+  //console.log("Wrapped data:", result);
+  return result;
 }
 
 var importObject = {
@@ -38,10 +42,18 @@ var importObject = {
     console_log: (msg) => { console.log(">>> " + wrap_string(msg)); },
     glActiveTexture: (texture) => { return gl.activeTexture(texture); },
     glAttachShader: (program, shader) => { return gl.attachShader(M[program], M[shader]); },
-    glBindAttribLocation: (program, index, name) => { return gl.bindAttribLocation(M[program], index, wrap_string(name)); },
+    glBindAttribLocation: (program, index, name) => {
+      const rname = wrap_string(name);
+      console.log("bindattr", program, M[program], index, "[" + rname + "]");
+      return gl.bindAttribLocation(M[program], index, rname);
+    },
     glBindBuffer: (target, buffer) => { return gl.bindBuffer(target, M[buffer]); },
     glBindTexture: (target, texture) => { return gl.bindTexture(target, M[texture]); },
-    glBufferData: (target, size, data, usage) => { return gl.bufferData(target, wrap_data(Uint8Array, data, size), usage); }, // wrapped on the JS side
+    glBufferData: (target, size, data, usage) => {
+      const buf = wrap_data(Uint8Array, data, size);
+      //console.log("buffer data", size, buf);
+      return gl.bufferData(target, buf, usage);
+    }, // wrapped on the JS side
     glClear: (mask) => { return gl.clear(mask); },
     glClearColor: (r, g, b, a) => { return gl.clearColor(r, g, b, a); },
     glCompileShader: (shader) => { return gl.compileShader(M[shader]); },
@@ -59,7 +71,7 @@ var importObject = {
     glGetError: () => { return gl.getError(); },
     glGetProgramInfoLog: (program) => { console.log("PROGRAM LOG:" + gl.getProgramInfoLog(M[program])); return wasm.exports.retstr_buf.value; },
     glGetShaderInfoLog: (shader) => { console.log("SHADER LOG:" + gl.getShaderInfoLog(M[shader])); return wasm.exports.retstr_buf.value; },
-    glGetUniformLocation: (program, name) => { return into_map(gl.getUniformLocation(M[program], name)); },
+    glGetUniformLocation: (program, name) => { return into_map(gl.getUniformLocation(M[program], wrap_string(name))); },
     glIsEnabled: (cap) => { return gl.isEnabled(cap); },
     glLinkProgram: (program) => { return gl.linkProgram(M[program]); },
     glShaderSource: (shader, source) => { return gl.shaderSource(M[shader], wrap_string(source)); },
@@ -67,9 +79,12 @@ var importObject = {
     glTexParameteri: (target, pname, param) => { return gl.texParameteri(target, pname, param); },
     glUseProgram: (program) => { return gl.useProgram(M[program]); },
     glUniform1i: (location_, value0) => { return gl.uniform1i(M[location_], value0); }, // wrapped on the JS side
-    glUniform4fv: (location_, count, value) => { return gl.uniform4fv(M[location_], wrap_data(Float32Array, value, count)); }, // wrapped on the JS side
-    glUniformMatrix4fv: (location_, count, transpose, value) => { return gl.uniformMatrix4fv(M[location_], count, wrap_data(Float32Array, value, 16*count)); }, // wrapped on the JS side
-    glVertexAttribPointer: (index, size, type_, normalized, stride, offset) => { return gl.vertexAttribPointer(index, size, type_, normalized, stride, offset); },
+    glUniform4fv: (location_, count, value) => { return gl.uniform4fv(M[location_], wrap_data(Float32Array, value, count*4)); }, // wrapped on the JS side
+    glUniformMatrix4fv: (location_, count, transpose, value) => { return gl.uniformMatrix4fv(M[location_], transpose, wrap_data(Float32Array, value, 16*count)); }, // wrapped on the JS side
+    glVertexAttribPointer: (index, size, type_, normalized, stride, offset) => {
+      //console.log("AttrPtr", index, size, type_, normalized, stride, offset);
+      return gl.vertexAttribPointer(index, size, type_, normalized, stride, offset);
+    },
   }
 };
 

@@ -8,6 +8,7 @@ pub usingnamespace if (builtin.target.isWasm()) struct {
     pub const GLuint = u32;
     pub const GLbitfield = u32;
     pub const GLint = i32;
+    pub const GLintptr = i32;
     pub const GLsizei = u32;
     pub const GLsizeiptr = c_long;
     pub const GLenum = u32;
@@ -123,7 +124,7 @@ pub usingnamespace if (builtin.target.isWasm()) struct {
     pub extern fn glDisable(cap: GLenum) void;
     pub extern fn glDisableVertexAttribArray(index: GLuint) void;
     pub extern fn glDrawArrays(mode: GLenum, first: GLint, count: GLsizei) void;
-    pub extern fn glDrawElements(mode: GLenum, count: GLsizei, type_: GLenum, offset: *allowzero const anyopaque) void; // wrapped on the JS side?
+    pub extern fn glDrawElements(mode: GLenum, count: GLsizei, type_: GLenum, offset: GLintptr) void; // wrapped on the JS side?
     pub extern fn glEnable(cap: GLenum) void;
     pub extern fn glEnableVertexAttribArray(index: GLuint) void;
     pub extern fn glGenerateMipmap(target: GLenum) void;
@@ -140,7 +141,7 @@ pub usingnamespace if (builtin.target.isWasm()) struct {
     pub extern fn glUniform1i(location: WebGLUniformLocation, value0: GLint) void; // wrapped on the JS side
     pub extern fn glUniform4fv(location: WebGLUniformLocation, count: GLsizei, value: [*c]const GLfloat) void; // wrapped on the JS side
     pub extern fn glUniformMatrix4fv(location: WebGLUniformLocation, count: GLsizei, transpose: GLboolean, value: [*c]const GLfloat) void; // wrapped on the JS side
-    pub extern fn glVertexAttribPointer(index: GLuint, size: GLint, type_: GLenum, normalized: GLboolean, stride: GLsizei, offset: *allowzero const anyopaque) void;
+    pub extern fn glVertexAttribPointer(index: GLuint, size: GLint, type_: GLenum, normalized: GLboolean, stride: GLsizei, offset: GLintptr) void;
 
     //
 } else @cImport({
