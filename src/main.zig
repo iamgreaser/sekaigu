@@ -140,7 +140,8 @@ var shader_uniforms: struct {
     mproj: Mat4f = Mat4f.perspective(800.0, 600.0, 0.01, 1000.0),
     mcam: Mat4f = Mat4f.I,
     mmodel: Mat4f = Mat4f.I,
-    light: Vec4f = Vec4f.new(.{ 0.0, 2.0, 0.0, 1.0 }),
+    light: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 }),
+    cam_pos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 }),
 } = .{};
 const shader_src = shadermagic.makeShaderSource(.{
     .uniform_type = @TypeOf(shader_uniforms),
@@ -148,7 +149,6 @@ const shader_src = shadermagic.makeShaderSource(.{
     .varyings = &[_]shadermagic.MakeShaderSourceOptions.FieldEntry{
         .{ "vec4", "vcolor" },
         .{ "vec3", "vwpos" },
-        .{ "vec3", "vspos" },
         .{ "vec3", "vnormal" },
     },
     .vert = (
@@ -160,11 +160,9 @@ const shader_src = shadermagic.makeShaderSource(.{
         \\void main () {
         \\    vcolor = icolor;
         \\    vec4 rwpos = mmodel * ipos;
-        \\    vec4 rspos = mcam * rwpos;
-        \\    vec4 rpos = mproj * rspos;
+        \\    vec4 rpos = mproj * mcam * rwpos;
         \\    vec4 rnormal = vec4(normalize(vec3zeroclamp(inormal.xyz)), 0.0);
         \\    vwpos = rwpos.xyz;
-        \\    vspos = rspos.xyz;
         \\    vnormal = (mmodel * rnormal).xyz;
         \\    gl_Position = rpos;
         \\}
@@ -176,9 +174,9 @@ const shader_src = shadermagic.makeShaderSource(.{
         \\    const vec3 Ms = vec3(0.8);
         \\    const float MsExp = 64.0;
         \\    vec3 normal = normalize(vnormal);
-        \\    vec3 vlightdir = normalize(light.xyz - vwpos);
+        \\    vec3 vlightdir = normalize(light.xyz - vwpos*light.w);
         \\    vec3 ambdiff = Ma + Md*max(0.0, dot(vlightdir, normal));
-        \\    vec3 vcamdir = -normalize(vspos);
+        \\    vec3 vcamdir = normalize(cam_pos.xyz - vwpos);
         \\    vec3 vspecdir = 2.0*normal*dot(normal, vlightdir) - vlightdir;
         \\    vec3 spec = Ms*pow(max(0.0, dot(vcamdir, vspecdir)), MsExp);
         \\    gl_FragColor = vec4((vcolor.rgb*ambdiff)+spec, vcolor.a);
@@ -193,18 +191,15 @@ const floor_shader_src = shadermagic.makeShaderSource(.{
     .varyings = &[_]shadermagic.MakeShaderSourceOptions.FieldEntry{
         .{ "vec2", "vtex0" },
         .{ "vec4", "vwpos" },
-        .{ "vec3", "vspos" },
         .{ "vec3", "vnormal" },
     },
     .vert = (
         \\void main () {
         \\    vtex0 = itex0.st;
         \\    vec4 rwpos = mmodel * ipos;
-        \\    vec4 rspos = mcam * rwpos;
-        \\    vec4 rpos = mproj * rspos;
+        \\    vec4 rpos = mproj * mcam * rwpos;
         \\    vec4 rnormal = vec4(normalize(inormal.xyz), 0.0);
         \\    vwpos = rwpos;
-        \\    vspos = rspos.xyz/rspos.w;
         \\    vnormal = (mmodel * rnormal).xyz;
         \\    gl_Position = rpos;
         \\}
@@ -219,9 +214,9 @@ const floor_shader_src = shadermagic.makeShaderSource(.{
         \\    vec2 tex0 = mod(vtex0/vwpos.w, 1.0);
         \\    vec4 vcolor = vec4(vec3((tex0.x < 0.5 == tex0.y < 0.5) ? 1.0 : 0.1), 0.0);
         \\    vec3 normal = normalize(vnormal);
-        \\    vec3 vlightdir = normalize(light.xyz - wpos);
+        \\    vec3 vlightdir = normalize(light.xyz - wpos*light.w);
         \\    vec3 ambdiff = Ma + Md*max(0.0, dot(vlightdir, normal));
-        \\    vec3 vcamdir = -normalize(vspos);
+        \\    vec3 vcamdir = normalize(cam_pos.xyz - wpos);
         \\    vec3 vspecdir = 2.0*normal*dot(normal, vlightdir) - vlightdir;
         \\    vec3 spec = Ms*pow(max(0.0, dot(vcamdir, vspecdir)), MsExp);
         \\    gl_FragColor = vec4((vcolor.rgb*ambdiff)+spec, vcolor.a);
@@ -271,6 +266,7 @@ pub fn main() !void {
         fps_counter += 1;
         try gl.clearColor(0.2, 0.0, 0.4, 0.0);
         try gl.clear(.{ .color = true, .depth = true });
+        shader_uniforms.cam_pos = cam_pos;
         shader_uniforms.mcam = Mat4f.I
             .rotate(cam_rot.a[0], 1.0, 0.0, 0.0)
             .rotate(cam_rot.a[1], 0.0, 1.0, 0.0)
