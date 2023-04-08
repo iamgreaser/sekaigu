@@ -17,7 +17,7 @@ const Mat4f = linalg.Mat4f;
 const MAX_FPS = 60;
 const NSEC_PER_FRAME = @divFloor(time.ns_per_s, MAX_FPS);
 
-pub const VA_P4HF_T2F_N3F = struct {
+pub const VA_P4HF_T2F_N3I8 = struct {
     pos: [4]f32,
     tex0: [2]f32,
     normal: [3]i8,
@@ -77,12 +77,12 @@ pub fn Model(comptime VAType: type, comptime IdxType: type) type {
     };
 }
 
-var model_floor = Model(VA_P4HF_T2F_N3F, u16){
-    .va = &[_]VA_P4HF_T2F_N3F{
-        .{ .pos = .{ 0.0, 0.0, 0.0, 1.0 }, .tex0 = .{ 0.0, 0.0 }, .normal = .{ 0.0, 1.0, 0.0 } },
-        .{ .pos = .{ 0.0, 0.0, -1.0, 0.0 }, .tex0 = .{ 0.0, -1.0 }, .normal = .{ 0.0, 1.0, 0.0 } },
-        .{ .pos = .{ -1.0, 0.0, 1.0, 0.0 }, .tex0 = .{ -1.0, 1.0 }, .normal = .{ 0.0, 1.0, 0.0 } },
-        .{ .pos = .{ 1.0, 0.0, 1.0, 0.0 }, .tex0 = .{ 1.0, 1.0 }, .normal = .{ 0.0, 1.0, 0.0 } },
+var model_floor = Model(VA_P4HF_T2F_N3I8, u16){
+    .va = &[_]VA_P4HF_T2F_N3I8{
+        .{ .pos = .{ 0.0, 0.0, 0.0, 1.0 }, .tex0 = .{ 0, 0 }, .normal = .{ 0, 127, 0 } },
+        .{ .pos = .{ 0.0, 0.0, -1.0, 0.0 }, .tex0 = .{ 0, -1 }, .normal = .{ 0, 127, 0 } },
+        .{ .pos = .{ -1.0, 0.0, 1.0, 0.0 }, .tex0 = .{ -1, 1 }, .normal = .{ 0, 127, 0 } },
+        .{ .pos = .{ 1.0, 0.0, 1.0, 0.0 }, .tex0 = .{ 1, 1 }, .normal = .{ 0, 127, 0 } },
     },
     .idx_list = &[_]u16{
         0, 1, 2,
@@ -185,18 +185,28 @@ var shader_prog: gl.Program = gl.Program.Dummy;
 
 const floor_shader_src = shadermagic.makeShaderSource(.{
     .uniform_type = @TypeOf(shader_uniforms),
-    .attrib_type = VA_P4HF_T2F_N3F,
+    .attrib_type = VA_P4HF_T2F_N3I8,
     .varyings = &[_]shadermagic.MakeShaderSourceOptions.FieldEntry{
         .{ "vec2", "vtex0" },
         .{ "vec4", "vwpos" },
         .{ "vec3", "vnormal" },
     },
     .vert = (
+        \\vec2 vec2zeroclamp (vec2 v) {
+        \\    const float CLAMPTHRESH = 1.0/126.0;
+        \\    return sign(v)*max(abs(v)-CLAMPTHRESH,0.0)/(1.0-CLAMPTHRESH);
+        \\}
+        \\
+        \\vec3 vec3zeroclamp (vec3 v) {
+        \\    const float CLAMPTHRESH = 1.0/126.0;
+        \\    return sign(v)*max(abs(v)-CLAMPTHRESH,0.0)/(1.0-CLAMPTHRESH);
+        \\}
+        \\
         \\void main () {
-        \\    vtex0 = itex0.st;
+        \\    vtex0 = vec2zeroclamp(itex0.st);
         \\    vec4 rwpos = mmodel * ipos;
         \\    vec4 rpos = mproj * mcam * rwpos;
-        \\    vec4 rnormal = vec4(normalize(inormal.xyz), 0.0);
+        \\    vec4 rnormal = vec4(normalize(vec3zeroclamp(inormal.xyz)), 0.0);
         \\    vwpos = rwpos;
         \\    vnormal = (mmodel * rnormal).xyz;
         \\    gl_Position = rpos;
