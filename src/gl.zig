@@ -27,7 +27,9 @@ pub const DrawMode = enum(c_uint) {
 
 pub const BO = @import("gl/BO.zig");
 pub const Program = @import("gl/Program.zig");
+pub const Sampler2D = @import("gl/Sampler2D.zig");
 pub const Shader = @import("gl/Shader.zig");
+pub const Texture2D = @import("gl/Texture2D.zig");
 
 pub fn _TestError() !void {
     switch (C.glGetError()) {
@@ -74,6 +76,11 @@ pub fn useProgram(program: Program) !void {
 
 pub fn unuseProgram() !void {
     C.glUseProgram(0);
+    try _TestError();
+}
+
+pub fn activeTexture(idx: usize) !void {
+    C.glActiveTexture(@intCast(C.GLenum, C.GL_TEXTURE0 + idx));
     try _TestError();
 }
 

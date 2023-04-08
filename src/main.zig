@@ -140,6 +140,7 @@ var shader_uniforms: struct {
     mmodel: Mat4f = Mat4f.I,
     light: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 }),
     cam_pos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 }),
+    smp0: gl.Sampler2D = gl.Sampler2D.makeSampler(0),
 } = .{};
 const shader_src = shadermagic.makeShaderSource(.{
     .uniform_type = @TypeOf(shader_uniforms),
@@ -220,7 +221,7 @@ const floor_shader_src = shadermagic.makeShaderSource(.{
         \\    const float MsExp = 64.0;
         \\    vec3 wpos = vwpos.xyz/vwpos.w;
         \\    vec2 tex0 = mod(vtex0/vwpos.w, 1.0);
-        \\    vec4 vcolor = vec4(vec3((tex0.x < 0.5 == tex0.y < 0.5) ? 1.0 : 0.1), 0.0);
+        \\    vec4 vcolor = texture2D(smp0, tex0);
         \\    vec3 normal = normalize(vnormal);
         \\    vec3 vlightdir = normalize(light.xyz - wpos*light.w);
         \\    vec3 ambdiff = Ma + Md*max(0.0, dot(vlightdir, normal));
@@ -233,6 +234,8 @@ const floor_shader_src = shadermagic.makeShaderSource(.{
 });
 var floor_shader_prog: gl.Program = gl.Program.Dummy;
 
+var test_tex: gl.Texture2D = gl.Texture2D.Dummy;
+
 pub fn main() !void {
     var gfx = try GfxContext.new();
     try gfx.init();
@@ -241,6 +244,40 @@ pub fn main() !void {
     // Compile the shaders
     shader_prog = try shader_src.compileProgram();
     floor_shader_prog = try floor_shader_src.compileProgram();
+
+    // Generate a test texture
+    test_tex = try gl.Texture2D.genTexture();
+    {
+        const SHIFT = 6;
+        const SIZE = 1 << SHIFT;
+        var buf: [SIZE * SIZE]u32 = undefined;
+        for (0..SIZE - 1) |y| {
+            for (0..SIZE - 1) |x| {
+                var v: u32 = (@intCast(u32, x ^ y)) << (8 - SHIFT);
+                if (SHIFT < 8) v |= (v >> SHIFT);
+                v *= 0x00010101;
+                v &= 0x00FFFFFF;
+                v |= 0xFF000000;
+                buf[y * SIZE + x] = v;
+            }
+        }
+        defer gl.activeTexture(0) catch {};
+        try gl.activeTexture(0);
+        defer {
+            // FIXME: if activeTexture somehow fails, this may unbind the wrong slot --GM
+            gl.activeTexture(0) catch {};
+            gl.Texture2D.unbindTexture() catch {};
+        }
+        try gl.Texture2D.bindTexture(test_tex);
+        // TODO: Add bindings for texture parameters --GM
+        C.glTexParameteri(C.GL_TEXTURE_2D, C.GL_TEXTURE_WRAP_S, C.GL_REPEAT);
+        C.glTexParameteri(C.GL_TEXTURE_2D, C.GL_TEXTURE_WRAP_T, C.GL_REPEAT);
+        C.glTexParameteri(C.GL_TEXTURE_2D, C.GL_TEXTURE_MAG_FILTER, C.GL_NEAREST);
+        C.glTexParameteri(C.GL_TEXTURE_2D, C.GL_TEXTURE_MIN_FILTER, C.GL_LINEAR_MIPMAP_LINEAR);
+        try gl._TestError();
+        try gl.Texture2D.texImage2D(0, SIZE, SIZE, .RGBA8888, &buf);
+        try gl.Texture2D.generateMipmap();
+    }
 
     // Load the VBOs
     try model_base.load();
@@ -270,6 +307,7 @@ pub fn main() !void {
     var fps_time_accum: u64 = 0;
     var fps_counter: u64 = 0;
     var dt: f32 = 0.0;
+    try shader_uniforms.smp0.bindTexture(test_tex);
     done: while (true) {
         fps_counter += 1;
         try gl.clearColor(0.2, 0.0, 0.4, 0.0);
@@ -300,7 +338,15 @@ pub fn main() !void {
             }
 
             {
-                //try gl.disable(.CullFace);
+                defer gl.activeTexture(0) catch {};
+                try gl.activeTexture(0);
+                defer {
+                    // FIXME: if activeTexture somehow fails, this may unbind the wrong slot --GM
+                    gl.activeTexture(0) catch {};
+                    gl.Texture2D.unbindTexture() catch {};
+                }
+                try gl.Texture2D.bindTexture(test_tex);
+
                 try gl.useProgram(floor_shader_prog);
                 defer gl.unuseProgram() catch {};
                 shader_uniforms.mmodel = Mat4f.I

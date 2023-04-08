@@ -59,6 +59,16 @@ pub fn uniform(self: Self, name: []const u8, comptime T: type, value: T) !void {
             Mat2f => C.glUniformMatrix2fv(idx, 1, C.GL_FALSE, &value.a[0]),
             Mat3f => C.glUniformMatrix3fv(idx, 1, C.GL_FALSE, &value.a[0]),
             Mat4f => C.glUniformMatrix4fv(idx, 1, C.GL_FALSE, &value.a[0]),
+            gl.Sampler2D => {
+                // FIXME clobbers GL_ACTIVE_TEXTURE state --GM
+                try gl.activeTexture(value.index);
+                if (value.texture.handle == 0) {
+                    try gl.Texture2D.unbindTexture();
+                } else {
+                    try gl.Texture2D.bindTexture(value.texture);
+                }
+                C.glUniform1i(idx, @intCast(C.GLint, value.index));
+            },
             else => switch (@typeInfo(T)) {
                 .Array => |ti| switch (ti.child) {
                     f32 => switch (ti.len) {

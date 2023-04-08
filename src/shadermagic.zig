@@ -55,6 +55,7 @@ pub fn zigTypeToGlslType(comptime T: type, comptime exact: bool) []const u8 {
         Mat2f => "mat2",
         Mat3f => "mat3",
         Mat4f => "mat4",
+        gl.Sampler2D => "sampler2D",
         else => switch (@typeInfo(T)) {
             .Array => |U| switch (U.child) {
                 f32, u8, i8, u16, i16 => switch (U.len) {
