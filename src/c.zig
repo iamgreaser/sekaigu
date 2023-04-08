@@ -89,6 +89,8 @@ pub usingnamespace if (builtin.target.isWasm()) struct {
     pub const GL_MIRRORED_REPEAT: GLenum = 0x8370;
 
     pub const GL_TEXTURE0: GLenum = 0x84C0; // goes up to GL_TEXTURE31
+    pub const GL_TEXTURE_MAX_ANISOTROPY_EXT: GLenum = 0x84FE;
+    pub const GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT: GLenum = 0x84FF;
 
     pub const GL_ARRAY_BUFFER: GLenum = 0x8892;
     pub const GL_ELEMENT_ARRAY_BUFFER: GLenum = 0x8893;
@@ -100,7 +102,11 @@ pub usingnamespace if (builtin.target.isWasm()) struct {
     pub const GL_FRAGMENT_SHADER: GLenum = 0x8B30;
     pub const GL_VERTEX_SHADER: GLenum = 0x8B31;
 
+    export var retstr_buf = [_]u8{0} ** 2048;
+    export var retstr_buf_used: u32 = 0;
+
     // Functions
+    pub extern fn console_log(line: [*c]const u8) void;
     pub extern fn glActiveTexture(texture: GLenum) void;
     pub extern fn glAttachShader(program: WebGLProgram, shader: WebGLShader) void;
     pub extern fn glBindAttribLocation(program: WebGLProgram, index: GLuint, name: DOMString) void;
@@ -128,7 +134,7 @@ pub usingnamespace if (builtin.target.isWasm()) struct {
     pub extern fn glIsEnabled(cap: GLenum) GLboolean;
     pub extern fn glLinkProgram(program: WebGLProgram) void;
     pub extern fn glShaderSource(shader: WebGLShader, source: DOMString) void;
-    pub extern fn glTexImage2D(target: GLenum, level: GLint, internalformat: GLint, width: GLsizei, height: GLsizei, border: GLsizei, format: GLenum, type_: GLenum, pixels: *allowzero const anyopaque) void;
+    pub extern fn glTexImage2D(target: GLenum, level: GLint, internalformat: GLint, width: GLsizei, height: GLsizei, border: GLsizei, format: GLenum, type_: GLenum, pixels: *allowzero const anyopaque, size: GLsizei) void; // wrapped on the JS side
     pub extern fn glTexParameteri(target: GLenum, pname: GLenum, param: GLint) void;
     pub extern fn glUseProgram(program: WebGLProgram) void;
     pub extern fn glUniform1i(location: WebGLUniformLocation, value0: GLint) void; // wrapped on the JS side

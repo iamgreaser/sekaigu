@@ -76,17 +76,32 @@ pub fn texImage2D(
         return error.BufferOverflow;
     }
 
-    C.glTexImage2D(
-        TARGET,
-        level,
-        glformat,
-        @intCast(C.GLsizei, width),
-        @intCast(C.GLsizei, height),
-        0, // Border must be 0
-        glformat,
-        glsize,
-        &data[0],
-    );
+    if (comptime builtin.target.isWasm()) {
+        C.glTexImage2D(
+            TARGET,
+            level,
+            glformat,
+            @intCast(C.GLsizei, width),
+            @intCast(C.GLsizei, height),
+            0, // Border must be 0
+            glformat,
+            glsize,
+            &data[0],
+            @sizeOf(@TypeOf(data[0])) * data.len,
+        );
+    } else {
+        C.glTexImage2D(
+            TARGET,
+            level,
+            glformat,
+            @intCast(C.GLsizei, width),
+            @intCast(C.GLsizei, height),
+            0, // Border must be 0
+            glformat,
+            glsize,
+            &data[0],
+        );
+    }
     try _TestError();
 }
 

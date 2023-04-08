@@ -15,17 +15,31 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
-    var exe = b.addExecutable(.{
-        .name = "cockel",
-        // In this case the main source file is merely a path, however, in more
-        // complicated build scripts, this could be a generated file.
-        .root_source_file = .{ .path = "src/main.zig" },
-        .target = target,
-        .optimize = optimize,
-    });
+    var exe = if (target.toTarget().isWasm())
+        b.addSharedLibrary(.{
+            .name = "cockel",
+            // In this case the main source file is merely a path, however, in more
+            // complicated build scripts, this could be a generated file.
+            .root_source_file = .{ .path = "src/main.zig" },
+            .target = target,
+            .optimize = optimize,
+        })
+    else
+        b.addExecutable(.{
+            .name = "cockel",
+            // In this case the main source file is merely a path, however, in more
+            // complicated build scripts, this could be a generated file.
+            .root_source_file = .{ .path = "src/main.zig" },
+            .target = target,
+            .optimize = optimize,
+        });
     // zig build only strips on ReleaseSmall. I'd like to strip on all Release* things, especially ReleaseSafe --GM
     if (optimize != .Debug) {
         exe.strip = true; // There is no zig build API for this yet AFAIK --GM
+    }
+    if (target.toTarget().isWasm()) {
+        // GH issue #14818 sets .rdynamic. If we don't do that, we don't get our symbols in. --GM
+        exe.rdynamic = true;
     }
     switch (target.os_tag orelse .freestanding) {
         .windows => {

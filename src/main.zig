@@ -37,22 +37,22 @@ const DUMMY_TIMER = (struct {
     }
 }){};
 
-pub fn _wasm_logFn(
-    comptime level: std.log.Level,
-    comptime scope: @TypeOf(.EnumLiteral),
-    comptime format: []const u8,
-    args: anytype,
-) void {
-    // TODO: Actually print this to console.log --GM
-    _ = level;
-    _ = scope;
-    _ = format;
-    _ = args;
-}
-
 pub const std_options = if (builtin.target.isWasm()) struct {
     // Provide a default log
-    pub const logFn = _wasm_logFn;
+    pub fn logFn(
+        comptime level: std.log.Level,
+        comptime scope: @TypeOf(.EnumLiteral),
+        comptime format: []const u8,
+        args: anytype,
+    ) void {
+        // TODO: Handle the other things --GM
+        _ = level;
+        _ = scope;
+
+        // Here's an overkill temp buffer.
+        var tmpbuf: [10 * 1024]u8 = undefined;
+        C.console_log(std.fmt.bufPrintZ(&tmpbuf, format, args) catch "ERROR: LOG LINE TOO LONG");
+    }
 } else struct {
     //
 };
@@ -363,17 +363,6 @@ pub fn main() !void {
     }
 }
 
-fn wasm_start() callconv(.C) void {
-    main() catch {
-        // TODO! --GM
-    };
-}
-comptime {
-    if (builtin.target.isWasm()) {
-        @export(wasm_start, .{ .name = "_start" });
-    }
-}
-
 var model_zrot: f32 = 0.0;
 var cam_rot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 });
 var cam_pos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 });
@@ -506,4 +495,29 @@ pub fn updateTime() !f32 {
         fps_counter = 0;
     }
     return @floatCast(f32, @intToFloat(f64, dt_snap) / @intToFloat(f64, time.ns_per_s * 1));
+}
+
+pub export fn c_init() bool {
+    init() catch {
+        return false;
+    };
+    return true;
+}
+
+pub export fn c_destroy() void {
+    destroy();
+}
+
+pub export fn c_drawScene() bool {
+    drawScene() catch {
+        return false;
+    };
+    return true;
+}
+
+pub export fn c_tickScene(dt: f32) bool {
+    tickScene(dt) catch {
+        return false;
+    };
+    return true;
 }
