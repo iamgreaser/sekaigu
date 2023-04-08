@@ -23,8 +23,8 @@ pub const MakeShaderSourceOptions = struct {
 };
 pub const ShaderSourceBlob = struct {
     pub const Self = @This();
-    vert_src: []const u8,
-    frag_src: []const u8,
+    vert_src: [:0]const u8,
+    frag_src: [:0]const u8,
     attrib_names: []const [:0]const u8,
 
     pub fn compileProgram(self: Self) !gl.Program {

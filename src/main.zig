@@ -1,9 +1,16 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const log = std.log.scoped(.main);
 const time = std.time;
 const C = @import("c.zig");
 
-const GfxContext = @import("GfxContext.zig");
+// FIXME: The dispatch seems borked --GM
+//const GfxContext = @import("GfxContext.zig");
+const GfxContext = if (builtin.target.isWasm())
+    @import("GfxContext/web.zig")
+else
+    @import("GfxContext/sdl.zig");
+
 const gl = @import("gl.zig");
 const shadermagic = @import("shadermagic.zig");
 const linalg = @import("linalg.zig");
@@ -16,6 +23,39 @@ const Mat4f = linalg.Mat4f;
 
 const MAX_FPS = 60;
 const NSEC_PER_FRAME = @divFloor(time.ns_per_s, MAX_FPS);
+
+const TIMERS_EXIST = !builtin.target.isWasm(); // TODO! --GM
+const DUMMY_TIMER = (struct {
+    pub const Self = @This();
+    pub fn read(self: Self) u64 {
+        _ = self;
+        return 0;
+    }
+    pub fn lap(self: Self) u64 {
+        _ = self;
+        return NSEC_PER_FRAME;
+    }
+}){};
+
+pub fn _wasm_logFn(
+    comptime level: std.log.Level,
+    comptime scope: @TypeOf(.EnumLiteral),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    // TODO: Actually print this to console.log --GM
+    _ = level;
+    _ = scope;
+    _ = format;
+    _ = args;
+}
+
+pub const std_options = if (builtin.target.isWasm()) struct {
+    // Provide a default log
+    pub const logFn = _wasm_logFn;
+} else struct {
+    //
+};
 
 pub const VA_P4HF_T2F_N3I8 = struct {
     pos: [4]f32,
@@ -235,11 +275,18 @@ const floor_shader_src = shadermagic.makeShaderSource(.{
 var floor_shader_prog: gl.Program = gl.Program.Dummy;
 
 var test_tex: gl.Texture2D = gl.Texture2D.Dummy;
+var gfx: GfxContext = undefined;
 
-pub fn main() !void {
-    var gfx = try GfxContext.new();
+var timer: if (TIMERS_EXIST) time.Timer else @TypeOf(DUMMY_TIMER) = undefined;
+var time_accum: u64 = 0;
+var frame_time_accum: i64 = 0;
+var fps_time_accum: u64 = 0;
+var fps_counter: u64 = 0;
+pub fn init() !void {
+    // Create a graphics context
+    gfx = try GfxContext.new();
     try gfx.init();
-    defer gfx.free();
+    errdefer gfx.free();
 
     // Compile the shaders
     shader_prog = try shader_src.compileProgram();
@@ -278,7 +325,7 @@ pub fn main() !void {
         C.glTexParameteri(C.GL_TEXTURE_2D, C.GL_TEXTURE_MIN_FILTER, C.GL_LINEAR_MIPMAP_LINEAR);
         //C.glTexParameteri(C.GL_TEXTURE_2D, C.GL_TEXTURE_MIN_FILTER, C.GL_NEAREST);
         // TODO: Detect the GL_EXT_texture_filter_anisotropic extension --GM
-        C.glTexParameteri(C.GL_TEXTURE_2D, C.GL_TEXTURE_MAX_ANISOTROPY_EXT, 16);
+        //C.glTexParameteri(C.GL_TEXTURE_2D, C.GL_TEXTURE_MAX_ANISOTROPY_EXT, 16);
         try gl._TestError();
         try gl.Texture2D.texImage2D(0, SIZE, SIZE, .RGBA8888, &buf);
         try gl.Texture2D.generateMipmap();
@@ -288,158 +335,175 @@ pub fn main() !void {
     try model_base.load();
     try model_floor.load();
 
-    var model_zrot: f32 = 0.0;
-    var cam_rot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 });
-    var cam_pos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 });
-    var cam_drot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 0.0 });
-    var cam_dpos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 0.0 });
-    var keys: struct {
-        w: bool = false,
-        a: bool = false,
-        s: bool = false,
-        d: bool = false,
-        c: bool = false,
-        SPACE: bool = false,
-        LEFT: bool = false,
-        RIGHT: bool = false,
-        UP: bool = false,
-        DOWN: bool = false,
-    } = .{};
-
-    var timer = try time.Timer.start();
-    var time_accum: u64 = 0;
-    var frame_time_accum: i64 = 0;
-    var fps_time_accum: u64 = 0;
-    var fps_counter: u64 = 0;
-    var dt: f32 = 0.0;
+    // Bind our test texture
     try shader_uniforms.smp0.bindTexture(test_tex);
+
+    // Start our timer
+    timer = if (TIMERS_EXIST) try time.Timer.start() else DUMMY_TIMER;
+}
+
+pub fn destroy() void {
+    gfx.free();
+}
+
+pub fn main() !void {
+    try init();
+    defer destroy();
+
+    var dt: f32 = 0.0;
     done: while (true) {
         fps_counter += 1;
-        try gl.clearColor(0.2, 0.0, 0.4, 0.0);
-        try gl.clear(.{ .color = true, .depth = true });
-        shader_uniforms.cam_pos = cam_pos;
-        shader_uniforms.mcam = Mat4f.I
-            .rotate(cam_rot.a[0], 1.0, 0.0, 0.0)
-            .rotate(cam_rot.a[1], 0.0, 1.0, 0.0)
-            .translate(-cam_pos.a[0], -cam_pos.a[1], -cam_pos.a[2]);
-        shader_uniforms.light = cam_pos;
-        {
-            const had_DepthTest = try gl.isEnabled(.DepthTest);
-            const had_CullFace = try gl.isEnabled(.CullFace);
-            defer gl.setEnabled(.DepthTest, had_DepthTest) catch {};
-            defer gl.setEnabled(.CullFace, had_CullFace) catch {};
-            try gl.enable(.DepthTest);
-            try gl.enable(.CullFace);
-
-            {
-                try gl.useProgram(shader_prog);
-                defer gl.unuseProgram() catch {};
-                shader_uniforms.mmodel = Mat4f.I
-                    .translate(0.5, 0.0, -3.0)
-                    .rotate(model_zrot, 0.0, 1.0, 0.0)
-                    .rotate(model_zrot * 2.0, 0.0, 0.0, 1.0);
-                try shadermagic.loadUniforms(shader_prog, @TypeOf(shader_uniforms), &shader_uniforms);
-                try model_base.draw(.Triangles);
-            }
-
-            {
-                defer gl.activeTexture(0) catch {};
-                try gl.activeTexture(0);
-                defer {
-                    // FIXME: if activeTexture somehow fails, this may unbind the wrong slot --GM
-                    gl.activeTexture(0) catch {};
-                    gl.Texture2D.unbindTexture() catch {};
-                }
-                try gl.Texture2D.bindTexture(test_tex);
-
-                try gl.useProgram(floor_shader_prog);
-                defer gl.unuseProgram() catch {};
-                shader_uniforms.mmodel = Mat4f.I
-                    .translate(0.0, -2.0, 0.0);
-                try shadermagic.loadUniforms(floor_shader_prog, @TypeOf(shader_uniforms), &shader_uniforms);
-                try model_floor.draw(.Triangles);
-            }
-        }
-
+        try drawScene();
         gfx.flip();
-        model_zrot = @mod(model_zrot + 3.141593 * 2.0 / 5.0 * dt, 3.141593 * 2.0);
-        cam_dpos = Vec4f.new(.{
-            if (keys.d) @as(f32, 1.0) else @as(f32, 0.0),
-            if (keys.SPACE) @as(f32, 1.0) else @as(f32, 0.0),
-            if (keys.s) @as(f32, 1.0) else @as(f32, 0.0),
-            0.0,
-        }).sub(Vec4f.new(.{
-            if (keys.a) @as(f32, 1.0) else @as(f32, 0.0),
-            if (keys.c) @as(f32, 1.0) else @as(f32, 0.0),
-            if (keys.w) @as(f32, 1.0) else @as(f32, 0.0),
-            0.0,
-        })).mul(5.0);
-        cam_drot = Vec4f.new(.{
-            if (keys.DOWN) @as(f32, 1.0) else @as(f32, 0.0),
-            if (keys.RIGHT) @as(f32, 1.0) else @as(f32, 0.0),
-            0.0,
-            0.0,
-        }).sub(Vec4f.new(.{
-            if (keys.UP) @as(f32, 1.0) else @as(f32, 0.0),
-            if (keys.LEFT) @as(f32, 1.0) else @as(f32, 0.0),
-            0.0,
-            0.0,
-        })).mul(3.141593); // 180 deg per second
-
-        // TODO: Have a matrix invert function --GM
-        const icam = Mat4f.I
-            .translate(cam_pos.a[0], cam_pos.a[1], cam_pos.a[2])
-            .rotate(-cam_rot.a[1], 0.0, 1.0, 0.0)
-            .rotate(-cam_rot.a[0], 1.0, 0.0, 0.0);
-        cam_pos = cam_pos.add(icam.mul(cam_dpos.mul(dt)));
-        cam_rot = cam_rot.add(cam_drot.mul(dt));
-        var ev: C.SDL_Event = undefined;
-        while (C.SDL_PollEvent(&ev) != 0) {
-            switch (ev.type) {
-                C.SDL_QUIT => {
-                    break :done;
-                },
-                C.SDL_KEYDOWN, C.SDL_KEYUP => {
-                    const pressed = (ev.type == C.SDL_KEYDOWN);
-                    const code = ev.key.keysym.sym;
-                    gotkey: inline for (@typeInfo(@TypeOf(keys)).Struct.fields) |field| {
-                        if (code == @field(C, "SDLK_" ++ field.name)) {
-                            @field(keys, field.name) = pressed;
-                            break :gotkey;
-                        }
-                    }
-                    //log.debug("key {s} {}", .{ if (pressed) "1" else "0", ev.key.keysym.sym });
-
-                },
-                else => {},
-            }
+        try tickScene(dt);
+        if (try gfx.applyEvents(@TypeOf(keys), &keys)) {
+            break :done;
         }
-        frame_time_accum += NSEC_PER_FRAME;
-        const sleep_time = frame_time_accum - @intCast(i64, timer.read());
-        if (sleep_time > 0) {
+        dt = try updateTime();
+    }
+}
+
+fn wasm_start() callconv(.C) void {
+    main() catch {
+        // TODO! --GM
+    };
+}
+comptime {
+    if (builtin.target.isWasm()) {
+        @export(wasm_start, .{ .name = "_start" });
+    }
+}
+
+var model_zrot: f32 = 0.0;
+var cam_rot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 });
+var cam_pos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 });
+var cam_drot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 0.0 });
+var cam_dpos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 0.0 });
+var keys: struct {
+    w: bool = false,
+    a: bool = false,
+    s: bool = false,
+    d: bool = false,
+    c: bool = false,
+    SPACE: bool = false,
+    LEFT: bool = false,
+    RIGHT: bool = false,
+    UP: bool = false,
+    DOWN: bool = false,
+} = .{};
+
+pub fn tickScene(dt: f32) !void {
+    model_zrot = @mod(model_zrot + 3.141593 * 2.0 / 5.0 * dt, 3.141593 * 2.0);
+    cam_dpos = Vec4f.new(.{
+        if (keys.d) @as(f32, 1.0) else @as(f32, 0.0),
+        if (keys.SPACE) @as(f32, 1.0) else @as(f32, 0.0),
+        if (keys.s) @as(f32, 1.0) else @as(f32, 0.0),
+        0.0,
+    }).sub(Vec4f.new(.{
+        if (keys.a) @as(f32, 1.0) else @as(f32, 0.0),
+        if (keys.c) @as(f32, 1.0) else @as(f32, 0.0),
+        if (keys.w) @as(f32, 1.0) else @as(f32, 0.0),
+        0.0,
+    })).mul(5.0);
+    cam_drot = Vec4f.new(.{
+        if (keys.DOWN) @as(f32, 1.0) else @as(f32, 0.0),
+        if (keys.RIGHT) @as(f32, 1.0) else @as(f32, 0.0),
+        0.0,
+        0.0,
+    }).sub(Vec4f.new(.{
+        if (keys.UP) @as(f32, 1.0) else @as(f32, 0.0),
+        if (keys.LEFT) @as(f32, 1.0) else @as(f32, 0.0),
+        0.0,
+        0.0,
+    })).mul(3.141593); // 180 deg per second
+
+    // TODO: Have a matrix invert function --GM
+    const icam = Mat4f.I
+        .translate(cam_pos.a[0], cam_pos.a[1], cam_pos.a[2])
+        .rotate(-cam_rot.a[1], 0.0, 1.0, 0.0)
+        .rotate(-cam_rot.a[0], 1.0, 0.0, 0.0);
+    cam_pos = cam_pos.add(icam.mul(cam_dpos.mul(dt)));
+    cam_rot = cam_rot.add(cam_drot.mul(dt));
+}
+
+pub fn drawScene() !void {
+    try gl.clearColor(0.2, 0.0, 0.4, 0.0);
+    try gl.clear(.{ .color = true, .depth = true });
+    shader_uniforms.cam_pos = cam_pos;
+    shader_uniforms.mcam = Mat4f.I
+        .rotate(cam_rot.a[0], 1.0, 0.0, 0.0)
+        .rotate(cam_rot.a[1], 0.0, 1.0, 0.0)
+        .translate(-cam_pos.a[0], -cam_pos.a[1], -cam_pos.a[2]);
+    shader_uniforms.light = cam_pos;
+    {
+        const had_DepthTest = try gl.isEnabled(.DepthTest);
+        const had_CullFace = try gl.isEnabled(.CullFace);
+        defer gl.setEnabled(.DepthTest, had_DepthTest) catch {};
+        defer gl.setEnabled(.CullFace, had_CullFace) catch {};
+        try gl.enable(.DepthTest);
+        try gl.enable(.CullFace);
+
+        {
+            try gl.useProgram(shader_prog);
+            defer gl.unuseProgram() catch {};
+            shader_uniforms.mmodel = Mat4f.I
+                .translate(0.5, 0.0, -3.0)
+                .rotate(model_zrot, 0.0, 1.0, 0.0)
+                .rotate(model_zrot * 2.0, 0.0, 0.0, 1.0);
+            try shadermagic.loadUniforms(shader_prog, @TypeOf(shader_uniforms), &shader_uniforms);
+            try model_base.draw(.Triangles);
+        }
+
+        {
+            defer gl.activeTexture(0) catch {};
+            try gl.activeTexture(0);
+            defer {
+                // FIXME: if activeTexture somehow fails, this may unbind the wrong slot --GM
+                gl.activeTexture(0) catch {};
+                gl.Texture2D.unbindTexture() catch {};
+            }
+            try gl.Texture2D.bindTexture(test_tex);
+
+            try gl.useProgram(floor_shader_prog);
+            defer gl.unuseProgram() catch {};
+            shader_uniforms.mmodel = Mat4f.I
+                .translate(0.0, -2.0, 0.0);
+            try shadermagic.loadUniforms(floor_shader_prog, @TypeOf(shader_uniforms), &shader_uniforms);
+            try model_floor.draw(.Triangles);
+        }
+    }
+}
+
+pub fn updateTime() !f32 {
+    frame_time_accum += NSEC_PER_FRAME;
+    const sleep_time = frame_time_accum - @intCast(i64, timer.read());
+    if (sleep_time > 0) {
+        if (comptime builtin.target.isWasm()) {
+            // TODO! --GM
+        } else {
             time.sleep(@intCast(u64, sleep_time));
         }
-        const dt_snap = timer.lap();
-        time_accum += dt_snap;
-        fps_time_accum += dt_snap;
-        frame_time_accum -= @intCast(i64, dt_snap);
-        if (frame_time_accum < 0) {
-            // Seems we can't achieve the given rendering FPS.
-            frame_time_accum = 0;
-        }
-
-        if (fps_time_accum >= (time.ns_per_s * 1)) {
-            {
-                //log.debug("FPS: {}", .{fps_counter});
-                var buf: [128]u8 = undefined;
-                gfx.setTitle(try std.fmt.bufPrintZ(&buf, "cockel pre-alpha | FPS: {}", .{fps_counter}));
-            }
-            if (fps_time_accum >= (time.ns_per_s * 1) * 2) {
-                log.warn("FPS counter slipped! Time wasted (nsec): {}", .{fps_time_accum});
-            }
-            fps_time_accum %= (time.ns_per_s * 1);
-            fps_counter = 0;
-        }
-        dt = @floatCast(f32, @intToFloat(f64, dt_snap) / @intToFloat(f64, time.ns_per_s * 1));
     }
+    const dt_snap = timer.lap();
+    time_accum += dt_snap;
+    fps_time_accum += dt_snap;
+    frame_time_accum -= @intCast(i64, dt_snap);
+    if (frame_time_accum < 0) {
+        // Seems we can't achieve the given rendering FPS.
+        frame_time_accum = 0;
+    }
+
+    if (fps_time_accum >= (time.ns_per_s * 1)) {
+        {
+            //log.debug("FPS: {}", .{fps_counter});
+            var buf: [128]u8 = undefined;
+            gfx.setTitle(try std.fmt.bufPrintZ(&buf, "cockel pre-alpha | FPS: {}", .{fps_counter}));
+        }
+        if (fps_time_accum >= (time.ns_per_s * 1) * 2) {
+            log.warn("FPS counter slipped! Time wasted (nsec): {}", .{fps_time_accum});
+        }
+        fps_time_accum %= (time.ns_per_s * 1);
+        fps_counter = 0;
+    }
+    return @floatCast(f32, @intToFloat(f64, dt_snap) / @intToFloat(f64, time.ns_per_s * 1));
 }

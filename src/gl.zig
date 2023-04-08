@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const log = std.log.scoped(.gl);
 const C = @import("c.zig");
@@ -36,11 +37,17 @@ pub fn _TestError() !void {
         0 => {},
         // OpenGL ES 2.0-defined errors
         C.GL_INVALID_ENUM => return error.GLInvalidEnum,
-        C.GL_INVALID_FRAMEBUFFER_OPERATION => return error.GLInvalidFramebufferOperation,
         C.GL_INVALID_VALUE => return error.GLInvalidValue,
         C.GL_INVALID_OPERATION => return error.GLInvalidOperation,
         C.GL_OUT_OF_MEMORY => return error.GLOutOfMemory,
         else => |e| {
+            if (comptime builtin.target.isWasm()) switch (e) {
+                C.GL_CONTEXT_LOST_WEBGL => return error.GLContextLostWebGL,
+                else => {},
+            } else switch (e) {
+                C.GL_INVALID_FRAMEBUFFER_OPERATION => return error.GLInvalidFramebufferOperation,
+                else => {},
+            }
             log.err("OpenGL error code {x}/{}", .{ e, e });
             return error.GLMiscError;
         },
@@ -191,9 +198,11 @@ pub fn disable(t: EnableTypes) !void {
     try _TestError();
 }
 pub fn isEnabled(t: EnableTypes) !bool {
-    const result = switch (C.glIsEnabled(@enumToInt(t))) {
+    const result = if (comptime builtin.target.isWasm())
+        C.glIsEnabled(@enumToInt(t))
+    else switch (C.glIsEnabled(@enumToInt(t))) {
         C.GL_FALSE => false,
-        C.GL_TRUE => false,
+        C.GL_TRUE => true,
         else => @panic("driver broke and returned invalid boolean for glIsEnabled"),
     };
     try _TestError();

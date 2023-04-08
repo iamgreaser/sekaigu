@@ -53,6 +53,10 @@ pub fn build(b: *std.Build) void {
             exe.linkSystemLibrary("SDL2main");
             exe.linkSystemLibrary("mingw32");
         },
+        .freestanding => {
+            // Could be wasm32, if so, disable stack smashing protection as it is currently broken --GM
+            exe.stack_protector = false;
+        },
         else => {
             // TODO: Get the actual path properly --GM
             exe.addIncludePath("/usr/include/SDL2");

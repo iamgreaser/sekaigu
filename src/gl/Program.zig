@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const log = std.log.scoped(.gl_Program);
 const C = @import("../c.zig");
@@ -33,7 +34,10 @@ pub fn bindAttribLocation(self: Self, idx: C.GLuint, name: [:0]const u8) !void {
 
 pub fn linkProgram(self: Self) !void {
     C.glLinkProgram(self.handle);
-    {
+    if (comptime builtin.target.isWasm()) {
+        var buf = C.glGetProgramInfoLog(self.handle);
+        log.info("PROGRAM LOG: <<<\n{s}\n>>>", .{buf});
+    } else {
         var buf: [1024]u8 = undefined;
         var buflen: C.GLsizei = 0;
         C.glGetProgramInfoLog(self.handle, buf.len, &buflen, &buf);

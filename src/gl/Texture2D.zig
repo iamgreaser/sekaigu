@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const log = std.log.scoped(.gl_Program);
 const C = @import("../c.zig");
@@ -12,7 +13,11 @@ pub const Dummy = Self{ .handle = 0 };
 
 pub fn genTexture() !Self {
     var handle: C.GLuint = 0;
-    C.glGenTextures(1, &handle);
+    if (comptime builtin.target.isWasm()) {
+        handle = C.glCreateTexture();
+    } else {
+        C.glGenTextures(1, &handle);
+    }
     try _TestError();
     return Self{ .handle = handle };
 }
