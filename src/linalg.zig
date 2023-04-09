@@ -57,9 +57,16 @@ fn Vec(comptime N: usize, comptime T: type) type {
             return result;
         }
 
+        pub fn length2(self: Self) T {
+            return self.dot(self);
+        }
+
+        pub fn length(self: Self) T {
+            return @sqrt(self.length2());
+        }
+
         pub fn normalize(self: Self) Self {
-            const length = @sqrt(self.dot(self));
-            return self.mul(1.0 / @max(0.00001, length));
+            return self.mul(1.0 / @max(0.00001, self.length()));
         }
 
         pub fn cross(self: Self, other: Self) Self {

@@ -11,6 +11,7 @@
 
 const std = @import("std");
 const log = std.log.scoped(.world);
+const testing = std.testing;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const linalg = @import("linalg.zig");
@@ -37,6 +38,18 @@ pub const Face = struct {
     pub const Idx = IdxType(ConvexHull, "faces", Self);
     norm: Vec3f,
     offs: f32,
+
+    pub fn calcSignedDist(self: *const Self, point: Vec3f) f32 {
+        return self.norm.dot(point) + self.offs;
+    }
+
+    pub fn project(self: *const Self, point: Vec3f) Vec3f {
+        return point.sub(self.norm.mul(self.calcSignedDist(point)));
+    }
+
+    pub fn projectDir(self: *const Self, point: Vec3f) Vec3f {
+        return point.sub(self.norm.mul(self.norm.dot(point)));
+    }
 };
 
 pub const Edge = struct {
@@ -48,11 +61,7 @@ pub const Edge = struct {
     face1: Face.Idx,
     point0: ?Point.Idx = null,
     point1: ?Point.Idx = null,
-    pub fn addFace(self: Self, p: Face) !Self {
-        // TODO! --GM
-        _ = p;
-        return self;
-    }
+    degenerate: bool = false, // "true" if this edge cannot be contained within the convex hull.
 };
 
 pub const Point = struct {
@@ -139,9 +148,11 @@ pub const ConvexHull = struct {
         // C: Project face1 normal onto face0.
         // D: Raycast point B direction C into face1.
         //
-
-        // TODO: Create the proper result --GM
-        const refpoint = Vec3f.new(.{ 0, 0, 0 });
+        const f0point = f0.project(Vec3f.new(.{ 0, 0, 0 }));
+        const f1dir = f0.projectDir(f1.norm).normalize();
+        const f1dot = f1dir.dot(f1.norm);
+        const f1delta = f1dir.mul(f1.calcSignedDist(f0point) / f1dot);
+        const refpoint = f0point.sub(f1delta);
 
         // ALLOCATING - POINTERS INVALID AFTER THIS POINT
         return self.allocEdge(refpoint, dir, face0, face1);
@@ -149,36 +160,44 @@ pub const ConvexHull = struct {
 };
 
 test "edge from 2 faces failed due to nonintersecting planes" {
-    var chull = try ConvexHull.init(std.testing.allocator);
+    var chull = try ConvexHull.init(testing.allocator);
     defer chull.deinit();
     const face0 = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, 0.0 }), 3.0);
     const face1 = try chull.addFace(Vec3f.new(.{ 0.0, 3.0, 0.0 }), -4.0);
-    try std.testing.expectError(error.NoIntersection, chull.makeEdgeFromFaces(face0, face1));
+    try testing.expectError(error.NoIntersection, chull.makeEdgeFromFaces(face0, face1));
 }
 
 test "edge from 2 faces" {
-    var chull = try ConvexHull.init(std.testing.allocator);
+    var chull = try ConvexHull.init(testing.allocator);
     defer chull.deinit();
     const face0 = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, 0.0 }), 3.0);
     const face1 = try chull.addFace(Vec3f.new(.{ 1.0, 0.0, 0.0 }), 4.0);
     const edge0 = try chull.makeEdgeFromFaces(face0, face1);
     const edge1 = try chull.makeEdgeFromFaces(face1, face0);
+
+    // Resolve pointers
+    var f0 = face0.ptr();
+    var f1 = face1.ptr();
     var e0 = edge0.ptr();
     var e1 = edge1.ptr();
 
     // Check references
-    try std.testing.expectEqual(face0.v, e0.face0.v);
-    try std.testing.expectEqual(face1.v, e0.face1.v);
-    try std.testing.expectEqual(face1.v, e1.face0.v);
-    try std.testing.expectEqual(face0.v, e1.face1.v);
-    try std.testing.expect(null == e0.point0);
-    try std.testing.expect(null == e0.point1);
-    try std.testing.expect(null == e1.point0);
-    try std.testing.expect(null == e1.point1);
+    try testing.expectEqual(face0.v, e0.face0.v);
+    try testing.expectEqual(face1.v, e0.face1.v);
+    try testing.expectEqual(face1.v, e1.face0.v);
+    try testing.expectEqual(face0.v, e1.face1.v);
+    try testing.expect(null == e0.point0);
+    try testing.expect(null == e0.point1);
+    try testing.expect(null == e1.point0);
+    try testing.expect(null == e1.point1);
 
     // Check directions
-    try std.testing.expectApproxEqAbs(@as(f32, 1.0), @fabs(e0.dir.normalize().dot(Vec3f.new(.{ 0, 0, 1 }).normalize())), 0.001);
-    try std.testing.expectApproxEqAbs(@as(f32, 1.0), @fabs(e1.dir.normalize().dot(Vec3f.new(.{ 0, 0, 1 }).normalize())), 0.001);
-    try std.testing.expectApproxEqAbs(@as(f32, -1.0), e0.dir.normalize().dot(e1.dir.normalize()), 0.001);
-    // TODO: Compute ref point --GM
+    try testing.expectApproxEqAbs(@as(f32, 1.0), @fabs(e0.dir.normalize().dot(Vec3f.new(.{ 0, 0, 1 }).normalize())), 0.001);
+    try testing.expectApproxEqAbs(@as(f32, 1.0), @fabs(e1.dir.normalize().dot(Vec3f.new(.{ 0, 0, 1 }).normalize())), 0.001);
+    try testing.expectApproxEqAbs(@as(f32, -1.0), e0.dir.normalize().dot(e1.dir.normalize()), 0.001);
+
+    // Check ref point
+    try testing.expectApproxEqAbs(@as(f32, 0.0), f0.calcSignedDist(e0.refpoint), 0.001);
+    try testing.expectApproxEqAbs(@as(f32, 0.0), f1.calcSignedDist(e0.refpoint), 0.001);
+    try testing.expectApproxEqAbs(@as(f32, 0.0), e0.refpoint.sub(e1.refpoint).length(), 0.001);
 }
