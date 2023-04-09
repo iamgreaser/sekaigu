@@ -27,8 +27,8 @@ pub fn IdxType(comptime Parent: type, comptime alfield: []const u8, comptime T: 
         const Self = @This();
         parent: *Parent,
         v: usize,
-        pub fn ptr(self: *const Self) T {
-            return @field(self.parent, alfield).items[self.v];
+        pub fn ptr(self: *const Self) *T {
+            return &@field(self.parent, alfield).items[self.v];
         }
     };
 }
@@ -47,6 +47,23 @@ pub const Face = struct {
         return point.sub(self.norm.mul(self.calcSignedDist(point)));
     }
 
+    pub fn raycast(self: *const Self, refpos: Vec3f, dir: Vec3f) !f32 {
+        const EPSILON = 0.0001;
+        const tangentdist = self.calcSignedDist(
+            refpos,
+        );
+        const dirdot = dir.dot(self.norm);
+        if (@fabs(dirdot) < EPSILON) {
+            return error.NoIntersection;
+        }
+        const realdist = -tangentdist / dirdot;
+        return realdist;
+    }
+
+    pub fn projectRay(self: *const Self, refpos: Vec3f, dir: Vec3f) !Vec3f {
+        return refpos.add(dir.mul(try self.raycast(refpos, dir)));
+    }
+
     pub fn projectDir(self: *const Self, point: Vec3f) Vec3f {
         return point.sub(self.norm.mul(self.norm.dot(point)));
     }
@@ -59,9 +76,8 @@ pub const Edge = struct {
     dir: Vec3f,
     face0: Face.Idx,
     face1: Face.Idx,
-    point0: ?Point.Idx = null,
-    point1: ?Point.Idx = null,
-    degenerate: bool = false, // "true" if this edge cannot be contained within the convex hull.
+    limitneg: ?f32 = null,
+    limitpos: ?f32 = null,
 };
 
 pub const Point = struct {
@@ -148,14 +164,51 @@ pub const ConvexHull = struct {
         // C: Project face1 normal onto face0.
         // D: Raycast point B direction C into face1.
         //
+        // NOTE: The raycast can probably still fail here.
+        // If so, it returns a NoIntersection error.
+        //
         const f0point = f0.project(Vec3f.new(.{ 0, 0, 0 }));
         const f1dir = f0.projectDir(f1.norm).normalize();
-        const f1dot = f1dir.dot(f1.norm);
-        const f1delta = f1dir.mul(f1.calcSignedDist(f0point) / f1dot);
-        const refpoint = f0point.sub(f1delta);
+        const refpoint = try f1.projectRay(f0point, f1dir);
 
         // ALLOCATING - POINTERS INVALID AFTER THIS POINT
         return self.allocEdge(refpoint, dir, face0, face1);
+    }
+
+    pub fn addFaceToEdge(self: *Self, edge: Edge.Idx, face: Face.Idx) void {
+        _ = self;
+        var e = edge.ptr();
+        const f = face.ptr();
+
+        // Determine direction
+        // NOTE: We hit the BACK of a face here!
+        // pos(itive) = hit with ray casting forwards
+        // neg(ative) = hit with ray casting backwards
+        const ispos = (f.norm.dot(e.dir) >= 0.0);
+
+        // Raycast edge into face
+        const result = f.raycast(e.refpoint, e.dir) catch |err| switch (err) {
+            error.NoIntersection => return,
+            else => unreachable,
+        };
+
+        if (ispos) {
+            if (e.limitpos) |lim| {
+                if (result < lim) {
+                    e.limitpos = result;
+                }
+            } else {
+                e.limitpos = result;
+            }
+        } else {
+            if (e.limitneg) |lim| {
+                if (result > lim) {
+                    e.limitneg = result;
+                }
+            } else {
+                e.limitneg = result;
+            }
+        }
     }
 };
 
@@ -186,10 +239,10 @@ test "edge from 2 faces" {
     try testing.expectEqual(face1.v, e0.face1.v);
     try testing.expectEqual(face1.v, e1.face0.v);
     try testing.expectEqual(face0.v, e1.face1.v);
-    try testing.expect(null == e0.point0);
-    try testing.expect(null == e0.point1);
-    try testing.expect(null == e1.point0);
-    try testing.expect(null == e1.point1);
+    try testing.expect(e0.limitpos == null);
+    try testing.expect(e0.limitneg == null);
+    try testing.expect(e1.limitpos == null);
+    try testing.expect(e1.limitneg == null);
 
     // Check directions
     try testing.expectApproxEqAbs(@as(f32, 1.0), @fabs(e0.dir.normalize().dot(Vec3f.new(.{ 0, 0, 1 }).normalize())), 0.001);
@@ -200,4 +253,83 @@ test "edge from 2 faces" {
     try testing.expectApproxEqAbs(@as(f32, 0.0), f0.calcSignedDist(e0.refpoint), 0.001);
     try testing.expectApproxEqAbs(@as(f32, 0.0), f1.calcSignedDist(e0.refpoint), 0.001);
     try testing.expectApproxEqAbs(@as(f32, 0.0), e0.refpoint.sub(e1.refpoint).length(), 0.001);
+}
+
+test "edge from 3 faces forming 1 point" {
+    var chull = try ConvexHull.init(testing.allocator);
+    defer chull.deinit();
+    const face0 = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, 0.0 }), 3.0);
+    const face1 = try chull.addFace(Vec3f.new(.{ 1.0, 0.0, 0.0 }), 4.0);
+    const face2 = try chull.addFace(Vec3f.new(.{ 0.0, 0.0, 1.0 }), 5.0);
+    const edge0 = try chull.makeEdgeFromFaces(face0, face1);
+    const edge1 = try chull.makeEdgeFromFaces(face1, face0);
+    chull.addFaceToEdge(edge0, face2);
+    chull.addFaceToEdge(edge1, face2);
+
+    // Resolve pointers
+    var e0 = edge0.ptr();
+    var e1 = edge1.ptr();
+
+    // Check references
+    try testing.expect((e0.limitpos == null) != (e0.limitneg == null));
+    try testing.expect((e0.limitpos != null) == (e1.limitneg != null));
+    try testing.expect((e0.limitneg == null) == (e1.limitpos == null));
+    try testing.expect(e0.limitpos == null);
+    try testing.expect(e0.limitneg != null);
+    try testing.expect(e1.limitpos != null);
+    try testing.expect(e1.limitneg == null);
+}
+
+test "edge from 4 faces forming 2 points" {
+    var chull = try ConvexHull.init(testing.allocator);
+    defer chull.deinit();
+    const face0 = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, 0.0 }), 3.0);
+    const face1 = try chull.addFace(Vec3f.new(.{ 1.0, 0.0, 0.0 }), 4.0);
+    const face2 = try chull.addFace(Vec3f.new(.{ 0.0, 0.0, 1.0 }), -5.0);
+    const face3 = try chull.addFace(Vec3f.new(.{ 0.0, 0.0, -1.0 }), -5.0);
+    const edge0 = try chull.makeEdgeFromFaces(face0, face1);
+    const edge1 = try chull.makeEdgeFromFaces(face1, face0);
+    chull.addFaceToEdge(edge0, face2);
+    chull.addFaceToEdge(edge0, face3);
+    chull.addFaceToEdge(edge1, face2);
+    chull.addFaceToEdge(edge1, face3);
+
+    // Resolve pointers
+    var e0 = edge0.ptr();
+    var e1 = edge1.ptr();
+
+    // Check references
+    try testing.expect(e0.limitpos != null);
+    try testing.expect(e0.limitneg != null);
+    try testing.expect(e1.limitpos != null);
+    try testing.expect(e1.limitneg != null);
+    try testing.expect(e0.limitneg orelse unreachable < e0.limitpos orelse unreachable);
+    try testing.expect(e1.limitneg orelse unreachable < e1.limitpos orelse unreachable);
+}
+
+test "edge from 4 faces forming degenerate" {
+    var chull = try ConvexHull.init(testing.allocator);
+    defer chull.deinit();
+    const face0 = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, 0.0 }), 3.0);
+    const face1 = try chull.addFace(Vec3f.new(.{ 1.0, 0.0, 0.0 }), 4.0);
+    const face2 = try chull.addFace(Vec3f.new(.{ 0.0, 0.0, 1.0 }), 5.0);
+    const face3 = try chull.addFace(Vec3f.new(.{ 0.0, 0.0, -1.0 }), 5.0);
+    const edge0 = try chull.makeEdgeFromFaces(face0, face1);
+    const edge1 = try chull.makeEdgeFromFaces(face1, face0);
+    chull.addFaceToEdge(edge0, face2);
+    chull.addFaceToEdge(edge0, face3);
+    chull.addFaceToEdge(edge1, face2);
+    chull.addFaceToEdge(edge1, face3);
+
+    // Resolve pointers
+    var e0 = edge0.ptr();
+    var e1 = edge1.ptr();
+
+    // Check references
+    try testing.expect(e0.limitpos != null);
+    try testing.expect(e0.limitneg != null);
+    try testing.expect(e1.limitpos != null);
+    try testing.expect(e1.limitneg != null);
+    try testing.expect(!(e0.limitneg orelse unreachable < e0.limitpos orelse unreachable));
+    try testing.expect(!(e1.limitneg orelse unreachable < e1.limitpos orelse unreachable));
 }
