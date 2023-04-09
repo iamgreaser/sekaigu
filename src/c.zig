@@ -108,6 +108,9 @@ pub usingnamespace if (builtin.target.isWasm()) struct {
 
     // Functions
     pub extern fn console_log(line: [*c]const u8) void;
+    pub extern fn fetch_event(buf: [*c]u8, size: usize) usize;
+
+    // WebGL wrapper functions
     pub extern fn glActiveTexture(texture: GLenum) void;
     pub extern fn glAttachShader(program: WebGLProgram, shader: WebGLShader) void;
     pub extern fn glBindAttribLocation(program: WebGLProgram, index: GLuint, name: DOMString) void;
@@ -131,7 +134,7 @@ pub usingnamespace if (builtin.target.isWasm()) struct {
     pub extern fn glGetError() GLenum;
     pub extern fn glGetProgramInfoLog(program: WebGLProgram) DOMString;
     pub extern fn glGetShaderInfoLog(shader: WebGLShader) DOMString;
-    pub extern fn glGetUniformLocation(program: WebGLProgram, name: DOMString) WebGLUniformLocation;
+    pub extern fn glGetUniformLocation(program: WebGLProgram, name: [*c]const u8, name_len: GLsizei) WebGLUniformLocation;
     pub extern fn glIsEnabled(cap: GLenum) GLboolean;
     pub extern fn glLinkProgram(program: WebGLProgram) void;
     pub extern fn glShaderSource(shader: WebGLShader, source: DOMString) void;

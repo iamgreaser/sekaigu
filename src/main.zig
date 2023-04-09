@@ -497,27 +497,31 @@ pub fn updateTime() !f32 {
     return @floatCast(f32, @intToFloat(f64, dt_snap) / @intToFloat(f64, time.ns_per_s * 1));
 }
 
-pub export fn c_init() bool {
+export fn c_init() bool {
     init() catch {
         return false;
     };
     return true;
 }
 
-pub export fn c_destroy() void {
+export fn c_destroy() void {
     destroy();
 }
 
-pub export fn c_drawScene() bool {
+export fn c_drawScene() bool {
     drawScene() catch {
         return false;
     };
     return true;
 }
 
-pub export fn c_tickScene(dt: f32) bool {
+export fn c_tickScene(dt: f32) bool {
     tickScene(dt) catch {
         return false;
     };
     return true;
+}
+
+export fn c_applyEvents() bool {
+    return gfx.applyEvents(@TypeOf(keys), &keys) catch true;
 }

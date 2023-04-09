@@ -1,7 +1,15 @@
+const FPS = 60.0;
+const FULL_SPEED = true;
+
+var evqueue = [];
+
 var canvas = document.getElementById("canvas");
 var gl = canvas.getContext("webgl", {
   alpha: false,
   depth: true,
+  premultipliedAlpha: true,
+  antialias: false,
+  preserveDrawingBuffer: false,
 });
 gl.viewport(0, 0, canvas.width, canvas.height);
 var memory;
@@ -21,13 +29,17 @@ function wrap_string (sptr) {
   const maxlen = 100 * 1024;
   const buf = new Uint8Array(memory.buffer, sptr);
   for (var i = 0; i < maxlen; i++) {
-    if (buf[i] == 0) {
+    if (buf[i] === 0) {
       const result = new TextDecoder("utf-8").decode(new Uint8Array(memory.buffer, sptr, i));
       //console.log("Wrapped string: <<<" + result + ">>>");
       return result;
     }
   }
   return null; // FIXME: No NUL terminator - needs to throw an error --GM
+}
+
+function wrap_string_len (sptr, size) {
+  return new TextDecoder("utf-8").decode(new Uint8Array(memory.buffer, sptr, size));
 }
 
 function wrap_data (basetype, dptr, len) {
@@ -37,9 +49,23 @@ function wrap_data (basetype, dptr, len) {
   return result;
 }
 
+function fetch_event(buf, buf_size) {
+  const ev = evqueue.shift();
+  if (ev === undefined) {
+    //console.log("no event");
+    return 0;
+  } else {
+    //console.log("got event <" + ev + ">");
+    var enc = new TextEncoder("utf-8");
+    var buf_view = new Uint8Array(memory.buffer, buf, buf_size);
+    return enc.encodeInto(ev, buf_view).written;
+  }
+}
+
 var importObject = {
   env: {
     console_log: (msg) => { console.log(">>> " + wrap_string(msg)); },
+    fetch_event: fetch_event,
     glActiveTexture: (texture) => { return gl.activeTexture(texture); },
     glAttachShader: (program, shader) => { return gl.attachShader(M[program], M[shader]); },
     glBindAttribLocation: (program, index, name) => {
@@ -71,7 +97,11 @@ var importObject = {
     glGetError: () => { return gl.getError(); },
     glGetProgramInfoLog: (program) => { console.log("PROGRAM LOG:" + gl.getProgramInfoLog(M[program])); return wasm.exports.retstr_buf.value; },
     glGetShaderInfoLog: (shader) => { console.log("SHADER LOG:" + gl.getShaderInfoLog(M[shader])); return wasm.exports.retstr_buf.value; },
-    glGetUniformLocation: (program, name) => { return into_map(gl.getUniformLocation(M[program], wrap_string(name))); },
+    glGetUniformLocation: (program, name, name_size) => {
+      const rname = wrap_string_len(name, name_size);
+      //console.log("name: " + rname);
+      return into_map(gl.getUniformLocation(M[program], rname));
+    },
     glIsEnabled: (cap) => { return gl.isEnabled(cap); },
     glLinkProgram: (program) => { return gl.linkProgram(M[program]); },
     glShaderSource: (shader, source) => { return gl.shaderSource(M[shader], wrap_string(source)); },
@@ -91,18 +121,51 @@ var importObject = {
 function draw_scene(ts) {
   //console.log(ts);
   if (!wasm.exports.c_drawScene()) {
-    console.log("DrawScene failed!");
+    console.log("drawScene failed!");
   }
 }
 
-const FPS = 20.0;
 var tick_interval;
-function tick_scene() {
+var prev_ts = null;
+function update_scene_full_speed(ts) {
+  var dt = 0.0;
+  if (prev_ts !== null) {
+    dt = (ts - prev_ts)/1000.0;
+  }
+  prev_ts = ts;
+  if (!wasm.exports.c_drawScene()) {
+    console.log("drawScene failed!");
+  }
+  if (wasm.exports.c_applyEvents()) {
+    console.log("applyEvents failed or exited!");
+  }
+  if (!wasm.exports.c_tickScene(dt)) {
+    console.log("tickScene failed!");
+  }
+  window.requestAnimationFrame(update_scene_full_speed);
+}
+function tick_scene_fixed() {
+  if (wasm.exports.c_applyEvents()) {
+    console.log("applyEvents failed or exited!");
+  }
   if (!wasm.exports.c_tickScene(1.0/FPS)) {
-    console.log("TickScene failed!");
+    console.log("tickScene failed!");
   }
   window.requestAnimationFrame(draw_scene);
 }
+
+const KEYMAP = {
+  "ArrowDown": "DOWN",
+  "ArrowLeft": "LEFT",
+  "ArrowRight": "RIGHT",
+  "ArrowUp": "UP",
+  "KeyA": "a",
+  "KeyC": "c",
+  "KeyD": "d",
+  "KeyS": "s",
+  "KeyW": "w",
+  "Space": "SPACE",
+};
 
 WebAssembly.instantiateStreaming(fetch("cockel.wasm"), importObject).then(
   (obj) => {
@@ -117,10 +180,29 @@ WebAssembly.instantiateStreaming(fetch("cockel.wasm"), importObject).then(
       obj.instance.exports.c_destroy();
       //return;
     }
-    if (!obj.instance.exports.c_tickScene(0.0)) {
-      console.log("TickScene failed!");
+
+    document.addEventListener("keydown", (e) => {
+      if (e.code in KEYMAP) {
+        evqueue.push("K" + KEYMAP[e.code]);
+      } else {
+        //console.log(["keydown", e.code]);
+      }
+    });
+
+    document.addEventListener("keyup", (e) => {
+      if (e.code in KEYMAP) {
+        evqueue.push("k" + KEYMAP[e.code]);
+      }
+    });
+
+    if (FULL_SPEED) {
+      window.requestAnimationFrame(update_scene_full_speed);
+    } else {
+      if (!obj.instance.exports.c_tickScene(0.0)) {
+        console.log("tickScene failed!");
+      }
+      window.requestAnimationFrame(draw_scene);
+      tick_interval = window.setInterval(tick_scene_fixed, 1000.0/FPS);
     }
-    window.requestAnimationFrame(draw_scene);
-    var tick_interval = window.setInterval(tick_scene, 1000.0/FPS);
   }
 );

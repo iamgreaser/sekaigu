@@ -47,7 +47,10 @@ pub fn linkProgram(self: Self) !void {
 }
 
 pub fn uniform(self: Self, name: []const u8, comptime T: type, value: T) !void {
-    const idx = C.glGetUniformLocation(self.handle, &name[0]);
+    const idx = if (comptime builtin.target.isWasm())
+        C.glGetUniformLocation(self.handle, &name[0], name.len)
+    else
+        C.glGetUniformLocation(self.handle, &name[0]);
     try _TestError();
     if (idx >= 0) {
         switch (T) {

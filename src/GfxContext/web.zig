@@ -46,13 +46,36 @@ pub fn free(self: *Self) void {
 }
 
 pub fn flip(self: *Self) void {
-    // TODO! --GM
+    // Handled as part of the JS event loop.
     _ = self;
 }
 
 pub fn applyEvents(self: Self, comptime TKeys: type, keys: *TKeys) anyerror!bool {
-    // TODO! --GM
     _ = self;
-    _ = keys;
-    return false;
+
+    var buf: [1024]u8 = undefined;
+    while (true) {
+        const evlen = C.fetch_event(&buf, buf.len);
+        if (evlen == 0) {
+            return false;
+        }
+        const evstr = buf[0..evlen];
+        switch (evstr[0]) {
+            'K', 'k' => {
+                // K: Key down
+                // k: Key up
+                const pressed = (evstr[0] == 'K');
+                const code = evstr[1..];
+                gotkey: inline for (@typeInfo(@TypeOf(keys.*)).Struct.fields) |field| {
+                    if (std.mem.eql(u8, code, field.name)) {
+                        @field(keys, field.name) = pressed;
+                        break :gotkey;
+                    }
+                }
+            },
+            else => {
+                log.err("Unhandled event type <{s}> for event <{s}>", .{ evstr[0..1], evstr });
+            },
+        }
+    }
 }
