@@ -109,15 +109,22 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 
     // Creates a step for unit testing.
-    const exe_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/main.zig" },
-        .target = target,
-        .optimize = optimize,
-    });
+    // FIXME: Doesn't seem to actually work --GM
+    if (!target.toTarget().isWasm()) {
+        const exe_tests = b.addTest(.{
+            .root_source_file = .{ .path = "src/main.zig" },
+            .target = target,
+            .optimize = optimize,
+        });
+        exe_tests.addIncludePath("/usr/include/SDL2");
+        exe_tests.linkSystemLibrary("c");
+        exe_tests.linkSystemLibrary("SDL2");
+        exe_tests.linkSystemLibrary("epoxy");
 
-    // Similar to creating the run step earlier, this exposes a `test` step to
-    // the `zig build --help` menu, providing a way for the user to request
-    // running the unit tests.
-    const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&exe_tests.step);
+        // Similar to creating the run step earlier, this exposes a `test` step to
+        // the `zig build --help` menu, providing a way for the user to request
+        // running the unit tests.
+        const test_step = b.step("test", "Run unit tests");
+        test_step.dependOn(&exe_tests.step);
+    }
 }

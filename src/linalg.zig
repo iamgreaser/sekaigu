@@ -48,6 +48,37 @@ fn Vec(comptime N: usize, comptime T: type) type {
                 else => @compileError("unhandled type for vec mul"),
             }
         }
+
+        pub fn dot(self: Self, other: Self) T {
+            var result: T = 0.0;
+            for (0..N) |i| {
+                result += self.a[i] * other.a[i];
+            }
+            return result;
+        }
+
+        pub fn normalize(self: Self) Self {
+            const length = @sqrt(self.dot(self));
+            return self.mul(1.0 / @max(0.00001, length));
+        }
+
+        pub fn cross(self: Self, other: Self) Self {
+            switch (comptime N) {
+                3 => {
+                    return Self{ .a = .{
+                        (self.a[1] * other.a[2]) - (self.a[2] * other.a[1]),
+                        (self.a[2] * other.a[0]) - (self.a[0] * other.a[2]),
+                        (self.a[0] * other.a[1]) - (self.a[1] * other.a[0]),
+                    } };
+                },
+
+                // Yes, there is a 7-dimensional cross product. It may be needed for 4D? --GM
+
+                else => {
+                    @compileError("cross product not supported for vector length");
+                },
+            }
+        }
     };
 }
 

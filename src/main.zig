@@ -20,6 +20,7 @@ const Vec4f = linalg.Vec4f;
 const Mat2f = linalg.Mat2f;
 const Mat3f = linalg.Mat3f;
 const Mat4f = linalg.Mat4f;
+const world = @import("world.zig");
 
 const MAX_FPS = 60;
 const NSEC_PER_FRAME = @divFloor(time.ns_per_s, MAX_FPS);
