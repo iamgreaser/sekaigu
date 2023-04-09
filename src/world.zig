@@ -339,3 +339,63 @@ test "edge from 4 faces forming degenerate" {
     try testing.expect(!(e0.limitneg orelse unreachable < e0.limitpos orelse unreachable));
     try testing.expect(!(e1.limitneg orelse unreachable < e1.limitpos orelse unreachable));
 }
+
+test "edge from 4 faces forming 1 point, far then near" {
+    var chull = try ConvexHull.init(testing.allocator);
+    defer chull.deinit();
+    const face0 = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, 0.0 }), 3.0);
+    const face1 = try chull.addFace(Vec3f.new(.{ 1.0, 0.0, 0.0 }), 4.0);
+    const face2 = try chull.addFace(Vec3f.new(.{ 0.0, 0.707, 0.707 }), -10.0);
+    const face3 = try chull.addFace(Vec3f.new(.{ 0.0, 0.0, 1.0 }), -2.0);
+    const edge0 = try chull.makeEdgeFromFaces(face0, face1);
+    const edge1 = try chull.makeEdgeFromFaces(face1, face0);
+    chull.addFaceToEdge(edge0, face2);
+    chull.addFaceToEdge(edge0, face3);
+    chull.addFaceToEdge(edge1, face2);
+    chull.addFaceToEdge(edge1, face3);
+
+    // Resolve pointers
+    var e0 = edge0.ptr();
+    var e1 = edge1.ptr();
+
+    // Check references
+    try testing.expect((e0.limitpos == null) != (e0.limitneg == null));
+    try testing.expect((e0.limitpos != null) == (e1.limitneg != null));
+    try testing.expect((e0.limitneg == null) == (e1.limitpos == null));
+    try testing.expect(e0.limitpos == null);
+    try testing.expect(e0.limitneg != null);
+    try testing.expect(e1.limitpos != null);
+    try testing.expect(e1.limitneg == null);
+    try testing.expectApproxEqAbs(@as(f32, -2.0), e0.limitneg orelse unreachable, 0.001);
+    try testing.expectApproxEqAbs(@as(f32, 2.0), e1.limitpos orelse unreachable, 0.001);
+}
+
+test "edge from 4 faces forming 1 point, near then far" {
+    var chull = try ConvexHull.init(testing.allocator);
+    defer chull.deinit();
+    const face0 = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, 0.0 }), 3.0);
+    const face1 = try chull.addFace(Vec3f.new(.{ 1.0, 0.0, 0.0 }), 4.0);
+    const face2 = try chull.addFace(Vec3f.new(.{ 0.0, 0.0, 1.0 }), -2.0);
+    const face3 = try chull.addFace(Vec3f.new(.{ 0.0, 0.707, 0.707 }), -10.0);
+    const edge0 = try chull.makeEdgeFromFaces(face0, face1);
+    const edge1 = try chull.makeEdgeFromFaces(face1, face0);
+    chull.addFaceToEdge(edge0, face2);
+    chull.addFaceToEdge(edge0, face3);
+    chull.addFaceToEdge(edge1, face2);
+    chull.addFaceToEdge(edge1, face3);
+
+    // Resolve pointers
+    var e0 = edge0.ptr();
+    var e1 = edge1.ptr();
+
+    // Check references
+    try testing.expect((e0.limitpos == null) != (e0.limitneg == null));
+    try testing.expect((e0.limitpos != null) == (e1.limitneg != null));
+    try testing.expect((e0.limitneg == null) == (e1.limitpos == null));
+    try testing.expect(e0.limitpos == null);
+    try testing.expect(e0.limitneg != null);
+    try testing.expect(e1.limitpos != null);
+    try testing.expect(e1.limitneg == null);
+    try testing.expectApproxEqAbs(@as(f32, -2.0), e0.limitneg orelse unreachable, 0.001);
+    try testing.expectApproxEqAbs(@as(f32, 2.0), e1.limitpos orelse unreachable, 0.001);
+}
