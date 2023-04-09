@@ -57,16 +57,17 @@ pub const std_options = if (builtin.target.isWasm()) struct {
     //
 };
 
-pub const VA_P4HF_T2F_N3I8 = struct {
+pub const VA_P4HF_T2F_C3F_N3F = struct {
     pos: [4]f32,
     tex0: [2]f32,
-    normal: [3]i8,
+    color: [3]f32,
+    normal: [3]f32,
 };
 
-pub const VA_P3F_C3U8_N3I8 = struct {
+pub const VA_P3F_C3F_N3F = struct {
     pos: [3]f32,
-    color: [3]u8,
-    normal: [3]i8,
+    color: [3]f32,
+    normal: [3]f32,
 };
 
 pub fn Model(comptime VAType: type, comptime IdxType: type) type {
@@ -117,12 +118,12 @@ pub fn Model(comptime VAType: type, comptime IdxType: type) type {
     };
 }
 
-var model_floor = Model(VA_P4HF_T2F_N3I8, u16){
-    .va = &[_]VA_P4HF_T2F_N3I8{
-        .{ .pos = .{ 0.0, 0.0, 0.0, 1.0 }, .tex0 = .{ 0, 0 }, .normal = .{ 0, 127, 0 } },
-        .{ .pos = .{ 0.0, 0.0, -1.0, 0.0 }, .tex0 = .{ 0, -1 }, .normal = .{ 0, 127, 0 } },
-        .{ .pos = .{ -1.0, 0.0, 1.0, 0.0 }, .tex0 = .{ -1, 1 }, .normal = .{ 0, 127, 0 } },
-        .{ .pos = .{ 1.0, 0.0, 1.0, 0.0 }, .tex0 = .{ 1, 1 }, .normal = .{ 0, 127, 0 } },
+var model_floor = Model(VA_P4HF_T2F_C3F_N3F, u16){
+    .va = &[_]VA_P4HF_T2F_C3F_N3F{
+        .{ .pos = .{ 0.0, 0.0, 0.0, 1.0 }, .tex0 = .{ 0, 0 }, .color = .{ 1.0, 1.0, 1.0 }, .normal = .{ 0, 1, 0 } },
+        .{ .pos = .{ 0.0, 0.0, -1.0, 0.0 }, .tex0 = .{ 0, -1 }, .color = .{ 0, 0, 0 }, .normal = .{ 0, 0, 0 } },
+        .{ .pos = .{ -1.0, 0.0, 1.0, 0.0 }, .tex0 = .{ -1, 1 }, .color = .{ 0, 0, 0 }, .normal = .{ 0, 0, 0 } },
+        .{ .pos = .{ 1.0, 0.0, 1.0, 0.0 }, .tex0 = .{ 1, 1 }, .color = .{ 0, 0, 0 }, .normal = .{ 0, 0, 0 } },
     },
     .idx_list = &[_]u16{
         0, 1, 2,
@@ -131,38 +132,38 @@ var model_floor = Model(VA_P4HF_T2F_N3I8, u16){
     },
 };
 
-var model_base = Model(VA_P3F_C3U8_N3I8, u16){
-    .va = &[_]VA_P3F_C3U8_N3I8{
+var model_base = Model(VA_P3F_C3F_N3F, u16){
+    .va = &[_]VA_P3F_C3F_N3F{
         // Z- Rear
-        .{ .pos = .{ -1.0, -1.0, -1.0 }, .color = .{ 0x80, 0x80, 0x80 }, .normal = .{ 0, 0, -128 } },
-        .{ .pos = .{ -1.0, 1.0, -1.0 }, .color = .{ 0x80, 0xFF, 0x80 }, .normal = .{ 0, 0, -128 } },
-        .{ .pos = .{ 1.0, -1.0, -1.0 }, .color = .{ 0xFF, 0x80, 0x80 }, .normal = .{ 0, 0, -128 } },
-        .{ .pos = .{ 1.0, 1.0, -1.0 }, .color = .{ 0xFF, 0xFF, 0x80 }, .normal = .{ 0, 0, -128 } },
+        .{ .pos = .{ -1.0, -1.0, -1.0 }, .color = .{ 0.5, 0.5, 0.5 }, .normal = .{ 0, 0, -1 } },
+        .{ .pos = .{ -1.0, 1.0, -1.0 }, .color = .{ 0.5, 1.0, 0.5 }, .normal = .{ 0, 0, -1 } },
+        .{ .pos = .{ 1.0, -1.0, -1.0 }, .color = .{ 1.0, 0.5, 0.5 }, .normal = .{ 0, 0, -1 } },
+        .{ .pos = .{ 1.0, 1.0, -1.0 }, .color = .{ 1.0, 1.0, 0.5 }, .normal = .{ 0, 0, -1 } },
         // Z+ Front
-        .{ .pos = .{ -1.0, -1.0, 1.0 }, .color = .{ 0x80, 0x80, 0xFF }, .normal = .{ 0, 0, 127 } },
-        .{ .pos = .{ 1.0, -1.0, 1.0 }, .color = .{ 0xFF, 0x80, 0xFF }, .normal = .{ 0, 0, 127 } },
-        .{ .pos = .{ -1.0, 1.0, 1.0 }, .color = .{ 0x80, 0xFF, 0xFF }, .normal = .{ 0, 0, 127 } },
-        .{ .pos = .{ 1.0, 1.0, 1.0 }, .color = .{ 0xFF, 0xFF, 0xFF }, .normal = .{ 0, 0, 127 } },
+        .{ .pos = .{ -1.0, -1.0, 1.0 }, .color = .{ 0.5, 0.5, 1.0 }, .normal = .{ 0, 0, 1 } },
+        .{ .pos = .{ 1.0, -1.0, 1.0 }, .color = .{ 1.0, 0.5, 1.0 }, .normal = .{ 0, 0, 1 } },
+        .{ .pos = .{ -1.0, 1.0, 1.0 }, .color = .{ 0.5, 1.0, 1.0 }, .normal = .{ 0, 0, 1 } },
+        .{ .pos = .{ 1.0, 1.0, 1.0 }, .color = .{ 1.0, 1.0, 1.0 }, .normal = .{ 0, 0, 1 } },
         // X-
-        .{ .pos = .{ -1.0, -1.0, -1.0 }, .color = .{ 0x80, 0x80, 0x80 }, .normal = .{ -128, 0, 0 } },
-        .{ .pos = .{ -1.0, -1.0, 1.0 }, .color = .{ 0x80, 0x80, 0xFF }, .normal = .{ -128, 0, 0 } },
-        .{ .pos = .{ -1.0, 1.0, -1.0 }, .color = .{ 0x80, 0xFF, 0x80 }, .normal = .{ -128, 0, 0 } },
-        .{ .pos = .{ -1.0, 1.0, 1.0 }, .color = .{ 0x80, 0xFF, 0xFF }, .normal = .{ -128, 0, 0 } },
+        .{ .pos = .{ -1.0, -1.0, -1.0 }, .color = .{ 0.5, 0.5, 0.5 }, .normal = .{ -1, 0, 0 } },
+        .{ .pos = .{ -1.0, -1.0, 1.0 }, .color = .{ 0.5, 0.5, 1.0 }, .normal = .{ -1, 0, 0 } },
+        .{ .pos = .{ -1.0, 1.0, -1.0 }, .color = .{ 0.5, 1.0, 0.5 }, .normal = .{ -1, 0, 0 } },
+        .{ .pos = .{ -1.0, 1.0, 1.0 }, .color = .{ 0.5, 1.0, 1.0 }, .normal = .{ -1, 0, 0 } },
         // X+
-        .{ .pos = .{ 1.0, -1.0, -1.0 }, .color = .{ 0xFF, 0x80, 0x80 }, .normal = .{ 127, 0, 0 } },
-        .{ .pos = .{ 1.0, 1.0, -1.0 }, .color = .{ 0xFF, 0xFF, 0x80 }, .normal = .{ 127, 0, 0 } },
-        .{ .pos = .{ 1.0, -1.0, 1.0 }, .color = .{ 0xFF, 0x80, 0xFF }, .normal = .{ 127, 0, 0 } },
-        .{ .pos = .{ 1.0, 1.0, 1.0 }, .color = .{ 0xFF, 0xFF, 0xFF }, .normal = .{ 127, 0, 0 } },
+        .{ .pos = .{ 1.0, -1.0, -1.0 }, .color = .{ 1.0, 0.5, 0.5 }, .normal = .{ 1, 0, 0 } },
+        .{ .pos = .{ 1.0, 1.0, -1.0 }, .color = .{ 1.0, 1.0, 0.5 }, .normal = .{ 1, 0, 0 } },
+        .{ .pos = .{ 1.0, -1.0, 1.0 }, .color = .{ 1.0, 0.5, 1.0 }, .normal = .{ 1, 0, 0 } },
+        .{ .pos = .{ 1.0, 1.0, 1.0 }, .color = .{ 1.0, 1.0, 1.0 }, .normal = .{ 1, 0, 0 } },
         // Y-
-        .{ .pos = .{ -1.0, -1.0, -1.0 }, .color = .{ 0x80, 0x80, 0x80 }, .normal = .{ 0, -128, 0 } },
-        .{ .pos = .{ 1.0, -1.0, -1.0 }, .color = .{ 0xFF, 0x80, 0x80 }, .normal = .{ 0, -128, 0 } },
-        .{ .pos = .{ -1.0, -1.0, 1.0 }, .color = .{ 0x80, 0x80, 0xFF }, .normal = .{ 0, -128, 0 } },
-        .{ .pos = .{ 1.0, -1.0, 1.0 }, .color = .{ 0xFF, 0x80, 0xFF }, .normal = .{ 0, -128, 0 } },
+        .{ .pos = .{ -1.0, -1.0, -1.0 }, .color = .{ 0.5, 0.5, 0.5 }, .normal = .{ 0, -1, 0 } },
+        .{ .pos = .{ 1.0, -1.0, -1.0 }, .color = .{ 1.0, 0.5, 0.5 }, .normal = .{ 0, -1, 0 } },
+        .{ .pos = .{ -1.0, -1.0, 1.0 }, .color = .{ 0.5, 0.5, 1.0 }, .normal = .{ 0, -1, 0 } },
+        .{ .pos = .{ 1.0, -1.0, 1.0 }, .color = .{ 1.0, 0.5, 1.0 }, .normal = .{ 0, -1, 0 } },
         // Y+
-        .{ .pos = .{ -1.0, 1.0, -1.0 }, .color = .{ 0x80, 0xFF, 0x80 }, .normal = .{ 0, 127, 0 } },
-        .{ .pos = .{ -1.0, 1.0, 1.0 }, .color = .{ 0x80, 0xFF, 0xFF }, .normal = .{ 0, 127, 0 } },
-        .{ .pos = .{ 1.0, 1.0, -1.0 }, .color = .{ 0xFF, 0xFF, 0x80 }, .normal = .{ 0, 127, 0 } },
-        .{ .pos = .{ 1.0, 1.0, 1.0 }, .color = .{ 0xFF, 0xFF, 0xFF }, .normal = .{ 0, 127, 0 } },
+        .{ .pos = .{ -1.0, 1.0, -1.0 }, .color = .{ 0.5, 1.0, 0.5 }, .normal = .{ 0, 1, 0 } },
+        .{ .pos = .{ -1.0, 1.0, 1.0 }, .color = .{ 0.5, 1.0, 1.0 }, .normal = .{ 0, 1, 0 } },
+        .{ .pos = .{ 1.0, 1.0, -1.0 }, .color = .{ 1.0, 1.0, 0.5 }, .normal = .{ 0, 1, 0 } },
+        .{ .pos = .{ 1.0, 1.0, 1.0 }, .color = .{ 1.0, 1.0, 1.0 }, .normal = .{ 0, 1, 0 } },
     },
     .idx_list = &[_]u16{
         0,  1,  2,  2,  1,  3,
@@ -184,10 +185,10 @@ var shader_uniforms: struct {
 } = .{};
 const shader_src = shadermagic.makeShaderSource(.{
     .uniform_type = @TypeOf(shader_uniforms),
-    .attrib_type = VA_P3F_C3U8_N3I8,
+    .attrib_type = VA_P3F_C3F_N3F,
     .varyings = &[_]shadermagic.MakeShaderSourceOptions.FieldEntry{
         .{ "vec4", "vcolor" },
-        .{ "vec3", "vwpos" },
+        .{ "vec4", "vwpos" },
         .{ "vec3", "vnormal" },
     },
     .vert = (
@@ -200,8 +201,8 @@ const shader_src = shadermagic.makeShaderSource(.{
         \\    vcolor = icolor;
         \\    vec4 rwpos = mmodel * ipos;
         \\    vec4 rpos = mproj * mcam * rwpos;
-        \\    vec4 rnormal = vec4(normalize(vec3zeroclamp(inormal.xyz)), 0.0);
-        \\    vwpos = rwpos.xyz;
+        \\    vec4 rnormal = vec4(inormal.xyz, 0.0);
+        \\    vwpos = rwpos;
         \\    vnormal = (mmodel * rnormal).xyz;
         \\    gl_Position = rpos;
         \\}
@@ -212,13 +213,16 @@ const shader_src = shadermagic.makeShaderSource(.{
         \\    const vec3 Md = vec3(0.9);
         \\    const vec3 Ms = vec3(0.8);
         \\    const float MsExp = 64.0;
-        \\    vec3 normal = normalize(vnormal);
-        \\    vec3 vlightdir = normalize(light.xyz - vwpos*light.w);
+        \\    vec3 wpos = vwpos.xyz/vwpos.w;
+        \\    vec4 vtxcolor = vec4(vcolor.rgb/vwpos.w, vcolor.a);
+        \\    vec4 color = vtxcolor;
+        \\    vec3 normal = normalize(vnormal/vwpos.w);
+        \\    vec3 vlightdir = normalize(light.xyz - wpos*light.w);
         \\    vec3 ambdiff = Ma + Md*max(0.0, dot(vlightdir, normal));
-        \\    vec3 vcamdir = normalize(cam_pos.xyz - vwpos);
+        \\    vec3 vcamdir = normalize(cam_pos.xyz - wpos);
         \\    vec3 vspecdir = 2.0*normal*dot(normal, vlightdir) - vlightdir;
         \\    vec3 spec = Ms*pow(max(0.0, dot(vcamdir, vspecdir)), MsExp);
-        \\    gl_FragColor = vec4((vcolor.rgb*ambdiff)+spec, vcolor.a);
+        \\    gl_FragColor = vec4((color.rgb*ambdiff)+spec, color.a);
         \\}
     ),
 });
@@ -227,10 +231,11 @@ var shader_prog_unicache: shadermagic.UniformIdxCache(@TypeOf(shader_uniforms)) 
 
 const floor_shader_src = shadermagic.makeShaderSource(.{
     .uniform_type = @TypeOf(shader_uniforms),
-    .attrib_type = VA_P4HF_T2F_N3I8,
+    .attrib_type = VA_P4HF_T2F_C3F_N3F,
     .varyings = &[_]shadermagic.MakeShaderSourceOptions.FieldEntry{
-        .{ "vec2", "vtex0" },
         .{ "vec4", "vwpos" },
+        .{ "vec2", "vtex0" },
+        .{ "vec4", "vcolor" },
         .{ "vec3", "vnormal" },
     },
     .vert = (
@@ -245,10 +250,11 @@ const floor_shader_src = shadermagic.makeShaderSource(.{
         \\}
         \\
         \\void main () {
-        \\    vtex0 = vec2zeroclamp(itex0.st);
+        \\    vtex0 = itex0.st;
+        \\    vcolor = icolor;
         \\    vec4 rwpos = mmodel * ipos;
         \\    vec4 rpos = mproj * mcam * rwpos;
-        \\    vec4 rnormal = vec4(normalize(vec3zeroclamp(inormal.xyz)), 0.0);
+        \\    vec4 rnormal = vec4(inormal.xyz, 0.0);
         \\    vwpos = rwpos;
         \\    vnormal = (mmodel * rnormal).xyz;
         \\    gl_Position = rpos;
@@ -262,14 +268,16 @@ const floor_shader_src = shadermagic.makeShaderSource(.{
         \\    const float MsExp = 64.0;
         \\    vec3 wpos = vwpos.xyz/vwpos.w;
         \\    vec2 tex0 = vtex0/vwpos.w;
-        \\    vec4 vcolor = texture2D(smp0, tex0);
-        \\    vec3 normal = normalize(vnormal);
+        \\    vec4 vtxcolor = vec4(vcolor.rgb/vwpos.w, vcolor.a);
+        \\    vec4 t0color = texture2D(smp0, tex0);
+        \\    vec4 color = t0color*vtxcolor;
+        \\    vec3 normal = normalize(vnormal/vwpos.w);
         \\    vec3 vlightdir = normalize(light.xyz - wpos*light.w);
         \\    vec3 ambdiff = Ma + Md*max(0.0, dot(vlightdir, normal));
         \\    vec3 vcamdir = normalize(cam_pos.xyz - wpos);
         \\    vec3 vspecdir = 2.0*normal*dot(normal, vlightdir) - vlightdir;
         \\    vec3 spec = Ms*pow(max(0.0, dot(vcamdir, vspecdir)), MsExp);
-        \\    gl_FragColor = vec4((vcolor.rgb*ambdiff)+spec, vcolor.a);
+        \\    gl_FragColor = vec4((color.rgb*ambdiff)+spec, vcolor.a);
         \\}
     ),
 });
