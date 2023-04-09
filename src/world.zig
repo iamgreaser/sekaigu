@@ -278,6 +278,8 @@ test "edge from 3 faces forming 1 point" {
     try testing.expect(e0.limitneg != null);
     try testing.expect(e1.limitpos != null);
     try testing.expect(e1.limitneg == null);
+    try testing.expectApproxEqAbs(@as(f32, 5.0), e0.limitneg orelse unreachable, 0.001);
+    try testing.expectApproxEqAbs(@as(f32, -5.0), e1.limitpos orelse unreachable, 0.001);
 }
 
 test "edge from 4 faces forming 2 points" {
@@ -286,7 +288,7 @@ test "edge from 4 faces forming 2 points" {
     const face0 = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, 0.0 }), 3.0);
     const face1 = try chull.addFace(Vec3f.new(.{ 1.0, 0.0, 0.0 }), 4.0);
     const face2 = try chull.addFace(Vec3f.new(.{ 0.0, 0.0, 1.0 }), -5.0);
-    const face3 = try chull.addFace(Vec3f.new(.{ 0.0, 0.0, -1.0 }), -5.0);
+    const face3 = try chull.addFace(Vec3f.new(.{ 0.0, 0.0, -1.0 }), -7.0);
     const edge0 = try chull.makeEdgeFromFaces(face0, face1);
     const edge1 = try chull.makeEdgeFromFaces(face1, face0);
     chull.addFaceToEdge(edge0, face2);
@@ -305,6 +307,10 @@ test "edge from 4 faces forming 2 points" {
     try testing.expect(e1.limitneg != null);
     try testing.expect(e0.limitneg orelse unreachable < e0.limitpos orelse unreachable);
     try testing.expect(e1.limitneg orelse unreachable < e1.limitpos orelse unreachable);
+    try testing.expectApproxEqAbs(@as(f32, 7.0), e0.limitpos orelse unreachable, 0.001);
+    try testing.expectApproxEqAbs(@as(f32, -5.0), e0.limitneg orelse unreachable, 0.001);
+    try testing.expectApproxEqAbs(@as(f32, 5.0), e1.limitpos orelse unreachable, 0.001);
+    try testing.expectApproxEqAbs(@as(f32, -7.0), e1.limitneg orelse unreachable, 0.001);
 }
 
 test "edge from 4 faces forming degenerate" {
