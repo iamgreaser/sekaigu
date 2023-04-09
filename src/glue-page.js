@@ -1,6 +1,9 @@
 const FPS = 60.0;
 const FULL_SPEED = true;
 
+// GL error queries are painfully slow on Chrome and also on mobiles.
+var suppress_gl_errors_where_sensible = true;
+var check_gl_errors = true;
 var evqueue = [];
 
 var canvas = document.getElementById("canvas");
@@ -94,7 +97,13 @@ var importObject = {
     glEnable: (cap) => { return gl.enable(cap); },
     glEnableVertexAttribArray: (index) => { return gl.enableVertexAttribArray(index); },
     glGenerateMipmap: (target) => { return gl.generateMipmap(target); },
-    glGetError: () => { return gl.getError(); },
+    glGetError: () => {
+      if (check_gl_errors) {
+        return gl.getError();
+      } else {
+        return 0;
+      }
+    },
     glGetProgramInfoLog: (program) => { console.log("PROGRAM LOG:" + gl.getProgramInfoLog(M[program])); return wasm.exports.retstr_buf.value; },
     glGetShaderInfoLog: (shader) => { console.log("SHADER LOG:" + gl.getShaderInfoLog(M[shader])); return wasm.exports.retstr_buf.value; },
     glGetUniformLocation: (program, name, name_size) => {
@@ -120,8 +129,13 @@ var importObject = {
 
 function draw_scene(ts) {
   //console.log(ts);
-  if (!wasm.exports.c_drawScene()) {
-    console.log("drawScene failed!");
+  try {
+    check_gl_errors = !suppress_gl_errors_where_sensible;
+    if (!wasm.exports.c_drawScene()) {
+      console.log("drawScene failed!");
+    }
+  } finally {
+    check_gl_errors = true;
   }
 }
 
@@ -133,8 +147,13 @@ function update_scene_full_speed(ts) {
     dt = (ts - prev_ts)/1000.0;
   }
   prev_ts = ts;
-  if (!wasm.exports.c_drawScene()) {
-    console.log("drawScene failed!");
+  try {
+    check_gl_errors = !suppress_gl_errors_where_sensible;
+    if (!wasm.exports.c_drawScene()) {
+      console.log("drawScene failed!");
+    }
+  } finally {
+    check_gl_errors = true;
   }
   if (wasm.exports.c_applyEvents()) {
     console.log("applyEvents failed or exited!");
