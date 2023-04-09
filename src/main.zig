@@ -426,6 +426,12 @@ pub fn tickScene(dt: f32) !void {
 }
 
 pub fn drawScene() !void {
+    shader_uniforms.mproj = Mat4f.perspective(
+        @intToFloat(f32, gfx.width),
+        @intToFloat(f32, gfx.height),
+        0.01,
+        1000.0,
+    );
     try gl.clearColor(0.2, 0.0, 0.4, 0.0);
     try gl.clear(.{ .color = true, .depth = true });
     shader_uniforms.cam_pos = cam_pos;
@@ -534,4 +540,11 @@ export fn c_tickScene(dt: f32) bool {
 
 export fn c_applyEvents() bool {
     return gfx.applyEvents(@TypeOf(keys), &keys) catch true;
+}
+
+export fn c_handleResize(width: i32, height: i32) bool {
+    gfx.handleResize(width, height) catch {
+        return false;
+    };
+    return true;
 }

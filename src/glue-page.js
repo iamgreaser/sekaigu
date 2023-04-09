@@ -6,6 +6,7 @@ var suppress_gl_errors_where_sensible = true;
 var check_gl_errors = true;
 var evqueue = [];
 
+var container = document.body;
 var canvas = document.getElementById("canvas");
 var gl = canvas.getContext("webgl", {
   alpha: false,
@@ -124,6 +125,7 @@ var importObject = {
       //console.log("AttrPtr", index, size, type_, normalized, stride, offset);
       return gl.vertexAttribPointer(index, size, type_, normalized, stride, offset);
     },
+    glViewport: (x, y, width, height) => { return gl.viewport(x, y, width, height); },
   }
 };
 
@@ -173,6 +175,19 @@ function tick_scene_fixed() {
   window.requestAnimationFrame(draw_scene);
 }
 
+function handle_resize() {
+  const w = container.offsetWidth;
+  const h = container.offsetHeight;
+  canvas.width = w;
+  canvas.height = h;
+  gl.drawingBufferWidth = w;
+  gl.drawingBufferHeight = h;
+  console.log("Resizing to", w, h);
+  if (!wasm.exports.c_handleResize(w, h)) {
+    console.log("handleResize failed!");
+  }
+}
+
 const KEYMAP = {
   "ArrowDown": "DOWN",
   "ArrowLeft": "LEFT",
@@ -212,6 +227,15 @@ WebAssembly.instantiateStreaming(fetch("cockel.wasm"), importObject).then(
       if (e.code in KEYMAP) {
         evqueue.push("k" + KEYMAP[e.code]);
       }
+    });
+
+    //document.addEventListener("touchstart", (e) => { evqueue.push("Kw"); });
+    //document.addEventListener("touchend", (e) => { evqueue.push("kw"); });
+
+    handle_resize();
+    window.addEventListener("resize", (e) => {
+      console.log("Got resize event", canvas);
+      handle_resize();
     });
 
     if (FULL_SPEED) {

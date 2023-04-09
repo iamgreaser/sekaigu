@@ -1,6 +1,7 @@
 const std = @import("std");
 const log = std.log.scoped(.gfx_context);
 const C = @import("../c.zig");
+const gl = @import("../gl.zig");
 
 const Self = @This();
 
@@ -50,7 +51,14 @@ pub fn flip(self: *Self) void {
     _ = self;
 }
 
-pub fn applyEvents(self: Self, comptime TKeys: type, keys: *TKeys) anyerror!bool {
+pub fn handleResize(self: *Self, width: i32, height: i32) !void {
+    self.width = @intCast(u16, width);
+    self.height = @intCast(u16, height);
+    C.glViewport(0, 0, width, height);
+    try gl._TestError();
+}
+
+pub fn applyEvents(self: *Self, comptime TKeys: type, keys: *TKeys) anyerror!bool {
     _ = self;
 
     var buf: [1024]u8 = undefined;

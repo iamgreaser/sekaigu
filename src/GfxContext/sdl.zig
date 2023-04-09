@@ -1,6 +1,7 @@
 const std = @import("std");
 const log = std.log.scoped(.gfx_context);
 const C = @import("../c.zig");
+const gl = @import("../gl.zig");
 
 const Self = @This();
 
@@ -56,7 +57,7 @@ pub fn init(self: *Self) anyerror!void {
         C.SDL_WINDOWPOS_UNDEFINED,
         self.width,
         self.height,
-        C.SDL_WINDOW_OPENGL,
+        C.SDL_WINDOW_OPENGL | C.SDL_WINDOW_RESIZABLE,
     )) |w| {
         self.window = w;
     } else {
@@ -103,8 +104,14 @@ pub fn flip(self: *Self) void {
     }
 }
 
-pub fn applyEvents(self: Self, comptime TKeys: type, keys: *TKeys) anyerror!bool {
-    _ = self;
+pub fn handleResize(self: *Self, width: i32, height: i32) !void {
+    self.width = @intCast(u16, width);
+    self.height = @intCast(u16, height);
+    C.glViewport(0, 0, width, height);
+    try gl._TestError();
+}
+
+pub fn applyEvents(self: *Self, comptime TKeys: type, keys: *TKeys) anyerror!bool {
     var ev: C.SDL_Event = undefined;
     while (C.SDL_PollEvent(&ev) != 0) {
         switch (ev.type) {
@@ -122,6 +129,12 @@ pub fn applyEvents(self: Self, comptime TKeys: type, keys: *TKeys) anyerror!bool
                 }
                 //log.debug("key {s} {}", .{ if (pressed) "1" else "0", ev.key.keysym.sym });
 
+            },
+            C.SDL_WINDOWEVENT => switch (ev.window.event) {
+                C.SDL_WINDOWEVENT_RESIZED => {
+                    try self.handleResize(ev.window.data1, ev.window.data2);
+                },
+                else => {},
             },
             else => {},
         }

@@ -87,7 +87,7 @@ pub fn texImage2D(
             glformat,
             glsize,
             &data[0],
-            @sizeOf(@TypeOf(data[0])) * data.len,
+            @intCast(C.GLsizei, @sizeOf(@TypeOf(data[0])) * data.len),
         );
     } else {
         C.glTexImage2D(
