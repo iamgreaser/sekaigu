@@ -22,17 +22,17 @@ pub fn createProgram() !Self {
     return Self{ .handle = result };
 }
 
-pub fn attachShader(self: Self, shader: gl.Shader) !void {
+pub fn attachShader(self: *Self, shader: gl.Shader) !void {
     C.glAttachShader(self.handle, shader.handle);
     try _TestError();
 }
 
-pub fn bindAttribLocation(self: Self, idx: C.GLuint, name: [:0]const u8) !void {
+pub fn bindAttribLocation(self: *Self, idx: C.GLuint, name: [:0]const u8) !void {
     C.glBindAttribLocation(self.handle, idx, name);
     try _TestError();
 }
 
-pub fn linkProgram(self: Self) !void {
+pub fn linkProgram(self: *Self) !void {
     C.glLinkProgram(self.handle);
     if (comptime builtin.target.isWasm()) {
         var buf = C.glGetProgramInfoLog(self.handle);
@@ -46,12 +46,17 @@ pub fn linkProgram(self: Self) !void {
     try _TestError();
 }
 
-pub fn uniform(self: Self, name: []const u8, comptime T: type, value: T) !void {
+pub fn getUniformLocation(self: *Self, name: [:0]const u8) !C.GLint {
     const idx = if (comptime builtin.target.isWasm())
         C.glGetUniformLocation(self.handle, &name[0], name.len)
     else
         C.glGetUniformLocation(self.handle, &name[0]);
     try _TestError();
+    return idx;
+}
+
+pub fn uniform(self: *Self, idx: C.GLint, comptime T: type, value: T) !void {
+    _ = self;
     if (idx >= 0) {
         switch (T) {
             u8, i8, u16, i16, u32, i32 => C.glUniform1i(idx, value),

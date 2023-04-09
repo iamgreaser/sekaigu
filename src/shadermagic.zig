@@ -28,7 +28,7 @@ pub const ShaderSourceBlob = struct {
     attrib_names: []const [:0]const u8,
 
     pub fn compileProgram(self: Self) !gl.Program {
-        const shader_prog = try gl.Program.createProgram();
+        var shader_prog = try gl.Program.createProgram();
         const shader_v = try gl.Shader.createShader(.Vertex);
         const shader_f = try gl.Shader.createShader(.Fragment);
         try shader_prog.attachShader(shader_v);
@@ -137,8 +137,42 @@ pub fn makeShaderSource(comptime opts: MakeShaderSourceOptions) ShaderSourceBlob
     };
 }
 
-pub fn loadUniforms(program: gl.Program, comptime T: type, uniforms: *const T) !void {
+fn _UIC_fields(comptime accum: []const std.builtin.Type.StructField, comptime remain: []const std.builtin.Type.StructField) []const std.builtin.Type.StructField {
+    if (remain.len == 0) {
+        return accum;
+    } else {
+        return _UIC_fields(
+            accum ++ [_]std.builtin.Type.StructField{
+                std.builtin.Type.StructField{
+                    .name = remain[0].name,
+                    .type = C.GLint,
+                    .default_value = &@as(C.GLint, -1),
+                    .is_comptime = false,
+                    .alignment = 1,
+                },
+            },
+            remain[1..],
+        );
+    }
+}
+pub fn UniformIdxCache(comptime T: type) type {
+    const fields = _UIC_fields(&[_]std.builtin.Type.StructField{}, @typeInfo(T).Struct.fields);
+    return @Type(std.builtin.Type{ .Struct = std.builtin.Type.Struct{
+        .layout = .Auto,
+        .fields = fields,
+        .decls = &[_]std.builtin.Type.Declaration{},
+        .is_tuple = false,
+    } });
+}
+
+pub fn loadUniforms(program: *gl.Program, comptime T: type, uniforms: *const T, uniformIdxCache: *UniformIdxCache(T)) !void {
     inline for (@typeInfo(T).Struct.fields) |field| {
-        try program.uniform(field.name, field.type, @field(uniforms, field.name));
+        const nameZ = field.name[0..field.name.len :0];
+        var idx = @field(uniformIdxCache, field.name);
+        if (idx < 0) {
+            idx = try program.getUniformLocation(nameZ);
+            @field(uniformIdxCache, field.name) = idx;
+        }
+        try program.uniform(idx, field.type, @field(uniforms, field.name));
     }
 }

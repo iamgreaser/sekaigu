@@ -223,6 +223,7 @@ const shader_src = shadermagic.makeShaderSource(.{
     ),
 });
 var shader_prog: gl.Program = gl.Program.Dummy;
+var shader_prog_unicache: shadermagic.UniformIdxCache(@TypeOf(shader_uniforms)) = .{};
 
 const floor_shader_src = shadermagic.makeShaderSource(.{
     .uniform_type = @TypeOf(shader_uniforms),
@@ -273,6 +274,7 @@ const floor_shader_src = shadermagic.makeShaderSource(.{
     ),
 });
 var floor_shader_prog: gl.Program = gl.Program.Dummy;
+var floor_shader_prog_unicache: shadermagic.UniformIdxCache(@TypeOf(shader_uniforms)) = .{};
 
 var test_tex: gl.Texture2D = gl.Texture2D.Dummy;
 var gfx: GfxContext = undefined;
@@ -439,7 +441,7 @@ pub fn drawScene() !void {
                 .translate(0.5, 0.0, -3.0)
                 .rotate(model_zrot, 0.0, 1.0, 0.0)
                 .rotate(model_zrot * 2.0, 0.0, 0.0, 1.0);
-            try shadermagic.loadUniforms(shader_prog, @TypeOf(shader_uniforms), &shader_uniforms);
+            try shadermagic.loadUniforms(&shader_prog, @TypeOf(shader_uniforms), &shader_uniforms, &shader_prog_unicache);
             try model_base.draw(.Triangles);
         }
 
@@ -457,7 +459,7 @@ pub fn drawScene() !void {
             defer gl.unuseProgram() catch {};
             shader_uniforms.mmodel = Mat4f.I
                 .translate(0.0, -2.0, 0.0);
-            try shadermagic.loadUniforms(floor_shader_prog, @TypeOf(shader_uniforms), &shader_uniforms);
+            try shadermagic.loadUniforms(&floor_shader_prog, @TypeOf(shader_uniforms), &shader_uniforms, &floor_shader_prog_unicache);
             try model_floor.draw(.Triangles);
         }
     }
