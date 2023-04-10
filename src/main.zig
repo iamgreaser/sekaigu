@@ -445,7 +445,7 @@ pub fn main() !void {
 
 var model_zrot: f32 = 0.0;
 var cam_rot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 });
-var cam_pos: Vec4f = Vec4f.new(.{ 0.0, 2.0, 10.0, 1.0 });
+var cam_pos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 });
 var cam_drot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 0.0 });
 var cam_dpos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 0.0 });
 var keys: struct {
@@ -544,7 +544,7 @@ pub fn drawScene() !void {
             defer gl.unuseProgram() catch {};
             shader_uniforms.mmodel = Mat4f.I
                 .translate(-5.0, -2.0, -10.0); //.rotate(-model_zrot, 0.0, 1.0, 0.0);
-            try shadermagic.loadUniforms(&shader_prog, @TypeOf(shader_uniforms), &shader_uniforms, &shader_prog_unicache);
+            try shadermagic.loadUniforms(&textured_prog, @TypeOf(shader_uniforms), &shader_uniforms, &textured_prog_unicache);
             try (model_pyramid orelse unreachable).draw(.Triangles);
         }
 

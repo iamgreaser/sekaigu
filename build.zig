@@ -32,6 +32,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = .{ .path = "src/main.zig" },
             .target = target,
             .optimize = optimize,
+            .linkage = .dynamic,
         });
     // zig build only strips on ReleaseSmall. I'd like to strip on all Release* things, especially ReleaseSafe --GM
     if (optimize != .Debug) {
@@ -74,6 +75,10 @@ pub fn build(b: *std.Build) void {
         else => {
             // TODO: Get the actual path properly --GM
             exe.addIncludePath("/usr/include/SDL2");
+
+            // Non-native 32-bit builds need these paths for me --GM
+            // exe.addIncludePath("/usr/include");
+            // exe.addLibraryPath("/usr/lib32");
         },
     }
     exe.linkSystemLibrary("c");

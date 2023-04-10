@@ -87,7 +87,7 @@ pub fn unuseProgram() !void {
 }
 
 pub fn activeTexture(idx: usize) !void {
-    C.glActiveTexture(@intCast(C.GLenum, C.GL_TEXTURE0 + idx));
+    C.glActiveTexture(@intCast(C.GLenum, C.GL_TEXTURE0) + @intCast(C.GLenum, idx));
     try _TestError();
 }
 
