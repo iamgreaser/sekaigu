@@ -399,9 +399,9 @@ pub const ConvexHull = struct {
                 const e0 = self.edges.items[firstedge];
                 if (!(e0.limitneg == null and e0.limitpos == null)) @panic("Invalid special case!");
 
-                // NOTE: We are making a fan from the first point, and 3 or 4 infinted points.
+                // NOTE: We are making a fan from the first point, and possibly 3 infinite points in a row.
                 // So the first point MUST be finite.
-                // Otherwise we get a 3-infinite point and that's... bad.
+                // Otherwise we can get a 3-infinite point and that's... bad.
 
                 // Refpoint
                 {
@@ -431,6 +431,7 @@ pub const ConvexHull = struct {
                 if (edgecount == 2) {
                     const e1 = self.edges.items[firstedge + 1];
                     if (!(e1.limitneg == null and e1.limitpos == null)) @panic("Invalid special case!");
+
                     // Side Negative
                     {
                         const posw0 = e1.dir.mul(-1.0).homogenize(0.0);
@@ -440,6 +441,19 @@ pub const ConvexHull = struct {
                             .color = colorw0.a,
                             .normal = normalw0.a,
                             .tex0 = tex0w0.a,
+                        };
+                    }
+
+                    // Side Refpoint
+                    // NOTE: This is actually required!
+                    {
+                        const posw1 = e1.refpoint.homogenize(1.0);
+                        const tex0w1 = Vec2f.new(.{ posw1.a[0], posw1.a[2] });
+                        (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
+                            .pos = posw1.a,
+                            .color = colorw1.a,
+                            .normal = normalw1.a,
+                            .tex0 = tex0w1.a,
                         };
                     }
 
@@ -463,8 +477,8 @@ pub const ConvexHull = struct {
                     else
                         unreachable;
 
-                    // Project negative of f0 direction onto f1
-                    const sidedir = f1.projectDir(f0.norm.mul(-1.0)).normalize();
+                    // Project negative of f1 normal direction onto f0
+                    const sidedir = f0.projectDir(f1.norm.mul(-1.0)).normalize();
 
                     // Side
                     {
@@ -856,6 +870,6 @@ test "bake 3 planes connected by 2 parallel edges" {
     try testing.expectEqual(@as(usize, 0), chull.points.items.len);
 
     // TODO: Look further into meshpoints and meshindices --GM
-    try testing.expectEqual(@as(usize, 1 * (4 + 5 + 4)), chull.meshpoints.items.len);
-    try testing.expectEqual(@as(usize, 3 * (2 + 3 + 2)), chull.meshindices.items.len);
+    try testing.expectEqual(@as(usize, 1 * (4 + 6 + 4)), chull.meshpoints.items.len);
+    try testing.expectEqual(@as(usize, 3 * (2 + 4 + 2)), chull.meshindices.items.len);
 }
