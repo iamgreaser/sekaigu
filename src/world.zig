@@ -88,15 +88,6 @@ pub const Edge = struct {
     limitnegpoint: ?Point.Idx = null,
     limitpospoint: ?Point.Idx = null,
 
-    pub fn isDegenerate(self: *const Self) bool {
-        if (self.limitneg) |ln| {
-            if (self.limitpos) |lp| {
-                return ln >= lp;
-            }
-        }
-        return false;
-    }
-
     pub fn getNegPoint(self: *const Self) ?Vec3f {
         return if (self.limitneg) |lim| self.refpoint.add(self.dir.mul(lim)) else null;
     }
@@ -294,6 +285,35 @@ pub const ConvexHull = struct {
         }
     }
 
+    pub fn edgeIsDead(self: *const Self, edge: Edge.Idx) bool {
+        const e = edge.ptr();
+
+        // Check if degenerate
+        if (e.limitneg) |ln| {
+            if (e.limitpos) |lp| {
+                return ln >= lp;
+            }
+        }
+
+        // Check if points are always behind or in line with planes
+        const EPSILON_PARALLEL = 0.001;
+        const EPSILON_FACESIDE = 0.001;
+        for (self.faces.items) |f| {
+            // Are we parallel?
+            if (@fabs(f.norm.dot(e.dir)) < EPSILON_PARALLEL) {
+                // Yes - are we strictly in front?
+                if (f.calcSignedDist(e.refpoint) > EPSILON_FACESIDE) {
+                    // Yes - this edge is dead
+                    return true;
+                }
+            } else {
+                // Cast ray against plane
+                // TODO! --GM
+            }
+        }
+        return false;
+    }
+
     pub fn buildEdgesAndPoints(self: *Self) !void {
         // Clear most lists
         self.edges.clearAndFree();
@@ -324,7 +344,7 @@ pub const ConvexHull = struct {
                     var e = edge.ptr();
 
                     // If this edge is degenerate, kill it.
-                    if (e.isDegenerate()) {
+                    if (self.edgeIsDead(edge)) {
                         //log.warn("degenerate edge {any} {any} {any} {any} {any} {any}", .{ e.face0.ptr(), e.face1.ptr(), e.limitneg, e.limitpos, e.refpoint.a, e.dir.a });
                         //log.warn("degenerate edge", .{});
                         if (edge.v != self.edges.items.len - 1) @panic("attempted to remove nonfinal edge in bake!");
@@ -363,27 +383,116 @@ pub const ConvexHull = struct {
             //
 
             const f0 = face0.ptr();
+            const firstmp = self.meshpoints.items.len;
+
+            // w1 = finite, w0 = infinite
+            const normalw1 = f0.norm;
+            const normalw0 = Vec3f.new(.{ 0, 0, 0 });
+            const colorw1 = Vec3f.new(.{ 1.0, 1.0, 1.0 }); // TODO! --GM
+            const colorw0 = Vec3f.new(.{ 0, 0, 0 });
 
             if (edgecount == 0) {
                 // 0 edges
                 if (true) @panic("TODO: 0-edge case --GM");
-            } else if (edgecount == 1) {
-                // 1 infinite edge
-                if (!(self.edges.items[firstedge].limitneg == null and self.edges.items[firstedge].limitpos == null)) @panic("Invalid special case!");
-                if (true) @panic("TODO: 1-infinte-edge case --GM");
-            } else if (edgecount == 2 and self.edges.items[firstedge].limitneg == null and self.edges.items[firstedge].limitpos == null) {
-                // 2 infinite edges
-                if (true) @panic("TODO: 2-infinite-edge case --GM");
+            } else if (edgecount == 1 or (edgecount == 2 and self.edges.items[firstedge].limitneg == null and self.edges.items[firstedge].limitpos == null)) {
+                // 1 or 2 infinite edges
+                const e0 = self.edges.items[firstedge];
+                if (!(e0.limitneg == null and e0.limitpos == null)) @panic("Invalid special case!");
+
+                // NOTE: We are making a fan from the first point, and 3 or 4 infinted points.
+                // So the first point MUST be finite.
+                // Otherwise we get a 3-infinite point and that's... bad.
+
+                // Refpoint
+                {
+                    const posw1 = e0.refpoint.homogenize(1.0);
+                    const tex0w1 = Vec2f.new(.{ posw1.a[0], posw1.a[2] });
+                    (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
+                        .pos = posw1.a,
+                        .color = colorw1.a,
+                        .normal = normalw1.a,
+                        .tex0 = tex0w1.a,
+                    };
+                }
+
+                // Positive
+                {
+                    const posw0 = e0.dir.homogenize(0.0);
+                    const tex0w0 = Vec2f.new(.{ posw0.a[0], posw0.a[2] });
+                    (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
+                        .pos = posw0.a,
+                        .color = colorw0.a,
+                        .normal = normalw0.a,
+                        .tex0 = tex0w0.a,
+                    };
+                }
+
+                // Side
+                if (edgecount == 2) {
+                    const e1 = self.edges.items[firstedge + 1];
+                    if (!(e1.limitneg == null and e1.limitpos == null)) @panic("Invalid special case!");
+                    // Side Negative
+                    {
+                        const posw0 = e1.dir.mul(-1.0).homogenize(0.0);
+                        const tex0w0 = Vec2f.new(.{ posw0.a[0], posw0.a[2] });
+                        (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
+                            .pos = posw0.a,
+                            .color = colorw0.a,
+                            .normal = normalw0.a,
+                            .tex0 = tex0w0.a,
+                        };
+                    }
+
+                    // Side Positive
+                    {
+                        const posw0 = e1.dir.homogenize(0.0);
+                        const tex0w0 = Vec2f.new(.{ posw0.a[0], posw0.a[2] });
+                        (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
+                            .pos = posw0.a,
+                            .color = colorw0.a,
+                            .normal = normalw0.a,
+                            .tex0 = tex0w0.a,
+                        };
+                    }
+                } else {
+                    // Find other face
+                    const f1 = if (face0.v == e0.face0.v)
+                        e0.face1.ptr()
+                    else if (face0.v == e0.face1.v)
+                        e0.face0.ptr()
+                    else
+                        unreachable;
+
+                    // Project negative of f0 direction onto f1
+                    const sidedir = f1.projectDir(f0.norm.mul(-1.0)).normalize();
+
+                    // Side
+                    {
+                        const posw0 = sidedir.homogenize(0.0);
+                        const tex0w0 = Vec2f.new(.{ posw0.a[0], posw0.a[2] });
+                        (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
+                            .pos = posw0.a,
+                            .color = colorw0.a,
+                            .normal = normalw0.a,
+                            .tex0 = tex0w0.a,
+                        };
+                    }
+                }
+
+                // Negative
+                {
+                    const posw0 = e0.dir.mul(-1.0).homogenize(0.0);
+                    const tex0w0 = Vec2f.new(.{ posw0.a[0], posw0.a[2] });
+                    (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
+                        .pos = posw0.a,
+                        .color = colorw0.a,
+                        .normal = normalw0.a,
+                        .tex0 = tex0w0.a,
+                    };
+                }
             } else {
                 // Open strip or closed loop
-                // w1 = finite, w0 = infinite
-                const normalw1 = f0.norm;
-                const normalw0 = Vec3f.new(.{ 0, 0, 0 });
-                const colorw1 = Vec3f.new(.{ 1.0, 1.0, 1.0 }); // TODO! --GM
-                const colorw0 = Vec3f.new(.{ 0, 0, 0 });
-
                 // Add all points
-                const firstmp = self.meshpoints.items.len;
                 {
                     var curedge = self.edges.items[firstedge];
 
@@ -451,15 +560,15 @@ pub const ConvexHull = struct {
                         }
                     }
                 }
-                const endmp = self.meshpoints.items.len;
-                //const mpcount = endmp - firstmp;
+            }
 
-                // Form a fan
-                for (firstmp + 1..endmp - 1) |fanidx| {
-                    (try self.meshindices.addOne()).* = @intCast(u16, firstmp);
-                    (try self.meshindices.addOne()).* = @intCast(u16, fanidx + 0);
-                    (try self.meshindices.addOne()).* = @intCast(u16, fanidx + 1);
-                }
+            // Form a fan
+            const endmp = self.meshpoints.items.len;
+            //const mpcount = endmp - firstmp;
+            for (firstmp + 1..endmp - 1) |fanidx| {
+                (try self.meshindices.addOne()).* = @intCast(u16, firstmp);
+                (try self.meshindices.addOne()).* = @intCast(u16, fanidx + 0);
+                (try self.meshindices.addOne()).* = @intCast(u16, fanidx + 1);
             }
         }
     }
@@ -699,13 +808,7 @@ test "bake an open baseless pyramid" {
     _ = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, -1.0 }).normalize(), -5.0 * @sqrt(2.0) / 2.0);
     _ = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, 1.0 }).normalize(), -5.0 * @sqrt(2.0) / 2.0);
     try chull.buildEdgesAndPoints();
-    // Use this to check if the points are correct if they aren't --GM
-    if (false) {
-        log.warn("test: ", .{});
-        for (chull.points.items) |p| {
-            log.warn("test: {any}", .{p});
-        }
-    }
+
     try testing.expectEqual(@as(usize, 4), chull.faces.items.len);
     // Generates our 8 edges doubled... and 2 degenerate edges doubled which are based on the two pairs of opposing sloped faces.
     try testing.expectEqual(@as(usize, 4 * 2), chull.edges.items.len);
@@ -722,4 +825,37 @@ test "bake an open baseless pyramid" {
     // TODO: Look further into meshpoints and meshindices --GM
     try testing.expectEqual(@as(usize, 1 * (3 + 3 + 3 + 3)), chull.meshpoints.items.len);
     try testing.expectEqual(@as(usize, 3 * (1 + 1 + 1 + 1)), chull.meshindices.items.len);
+}
+
+test "bake 2 planes connected by 1 parallel edge" {
+    var chull = try ConvexHull.new(testing.allocator);
+    defer chull.deinit();
+    _ = try chull.addFace(Vec3f.new(.{ -1.0, 1.0, 0.0 }).normalize(), -5.0 * @sqrt(2.0));
+    _ = try chull.addFace(Vec3f.new(.{ 1.0, 1.0, 0.0 }).normalize(), -5.0 * @sqrt(2.0));
+    try chull.buildEdgesAndPoints();
+
+    try testing.expectEqual(@as(usize, 2), chull.faces.items.len);
+    try testing.expectEqual(@as(usize, 1 * 2), chull.edges.items.len);
+    try testing.expectEqual(@as(usize, 0), chull.points.items.len);
+
+    // TODO: Look further into meshpoints and meshindices --GM
+    try testing.expectEqual(@as(usize, 1 * (4 + 4)), chull.meshpoints.items.len);
+    try testing.expectEqual(@as(usize, 3 * (2 + 2)), chull.meshindices.items.len);
+}
+
+test "bake 3 planes connected by 2 parallel edges" {
+    var chull = try ConvexHull.new(testing.allocator);
+    defer chull.deinit();
+    _ = try chull.addFace(Vec3f.new(.{ -1.0, 1.0, 0.0 }).normalize(), -5.0 * @sqrt(2.0));
+    _ = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, 0.0 }).normalize(), -2.0);
+    _ = try chull.addFace(Vec3f.new(.{ 1.0, 1.0, 0.0 }).normalize(), -5.0 * @sqrt(2.0));
+    try chull.buildEdgesAndPoints();
+
+    try testing.expectEqual(@as(usize, 3), chull.faces.items.len);
+    try testing.expectEqual(@as(usize, 2 * 2), chull.edges.items.len);
+    try testing.expectEqual(@as(usize, 0), chull.points.items.len);
+
+    // TODO: Look further into meshpoints and meshindices --GM
+    try testing.expectEqual(@as(usize, 1 * (4 + 5 + 4)), chull.meshpoints.items.len);
+    try testing.expectEqual(@as(usize, 3 * (2 + 3 + 2)), chull.meshindices.items.len);
 }
