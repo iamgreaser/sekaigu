@@ -397,6 +397,11 @@ pub fn init() !void {
     // Bake our hulls into meshes
     model_pyramid = try Model(VA_P4HF_T2F_C3F_N3F, u16).fromConvexHullPlanes(main_allocator, &[_][4]f32{
         //.{ 0.0, -1.0, 0.0, 0.0 },
+        //.{ -1.0, 1.0, 0.0, -5.0 / 2.0 },
+        //.{ 1.0, 1.0, 0.0, -5.0 / 2.0 },
+        //.{ 0.0, 1.0, -1.0, -5.0 / 2.0 },
+        //.{ 0.0, 1.0, 1.0, -5.0 / 2.0 },
+        .{ 0.0, 1.0, 0.0, -5.0 / 2.0 },
         .{ -1.0, 1.0, 0.0, -5.0 / 2.0 },
         .{ 1.0, 1.0, 0.0, -5.0 / 2.0 },
         .{ 0.0, 1.0, -1.0, -5.0 / 2.0 },
@@ -440,7 +445,7 @@ pub fn main() !void {
 
 var model_zrot: f32 = 0.0;
 var cam_rot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 });
-var cam_pos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 });
+var cam_pos: Vec4f = Vec4f.new(.{ 0.0, 2.0, 10.0, 1.0 });
 var cam_drot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 0.0 });
 var cam_dpos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 0.0 });
 var keys: struct {
@@ -525,11 +530,20 @@ pub fn drawScene() !void {
         }
 
         {
-            try gl.useProgram(shader_prog);
+            defer gl.activeTexture(0) catch {};
+            try gl.activeTexture(0);
+            defer {
+                // FIXME: if activeTexture somehow fails, this may unbind the wrong slot --GM
+                gl.activeTexture(0) catch {};
+                gl.Texture2D.unbindTexture() catch {};
+            }
+            try gl.Texture2D.bindTexture(test_tex);
+
+            //try gl.useProgram(shader_prog);
+            try gl.useProgram(textured_prog);
             defer gl.unuseProgram() catch {};
             shader_uniforms.mmodel = Mat4f.I
-                .translate(-5.0, -2.0, -10.0)
-                .rotate(-model_zrot, 0.0, 1.0, 0.0);
+                .translate(-5.0, -2.0, -10.0); //.rotate(-model_zrot, 0.0, 1.0, 0.0);
             try shadermagic.loadUniforms(&shader_prog, @TypeOf(shader_uniforms), &shader_uniforms, &shader_prog_unicache);
             try (model_pyramid orelse unreachable).draw(.Triangles);
         }

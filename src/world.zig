@@ -379,27 +379,31 @@ pub const ConvexHull = struct {
                 // w1 = finite, w0 = infinite
                 const normalw1 = f0.norm;
                 const normalw0 = Vec3f.new(.{ 0, 0, 0 });
+                const colorw1 = Vec3f.new(.{ 1.0, 1.0, 1.0 }); // TODO! --GM
                 const colorw0 = Vec3f.new(.{ 0, 0, 0 });
-                const tex0w0 = Vec2f.new(.{ 0, 0 }); // what's this? oh dammit I have been on Neos too long --GM
 
                 // Add all points
                 const firstmp = self.meshpoints.items.len;
                 {
                     var curedge = self.edges.items[firstedge];
+
                     for (0..edgecount) |_| {
                         // Add the negative point to the edge list
-                        const colorw1 = Vec3f.new(.{ 1.0, 1.0, 1.0 }); // TODO! --GM
-                        const tex0w1 = Vec2f.new(.{ 0.0, 0.0 }); // TODO! --GM
+                        // TEST: Use x,z directly --GM
                         if (curedge.limitnegpoint) |lnpoint| {
+                            const posw1 = lnpoint.ptr().pos.homogenize(1.0);
+                            const tex0w1 = Vec2f.new(.{ posw1.a[0], posw1.a[2] });
                             (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
-                                .pos = lnpoint.ptr().pos.homogenize(1.0).a,
+                                .pos = posw1.a,
                                 .color = colorw1.a,
                                 .normal = normalw1.a,
                                 .tex0 = tex0w1.a,
                             };
                         } else {
+                            const posw0 = curedge.dir.mul(-1.0).homogenize(0.0);
+                            const tex0w0 = Vec2f.new(.{ -curedge.dir.a[0], -curedge.dir.a[2] });
                             (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
-                                .pos = curedge.dir.mul(-1.0).homogenize(0.0).a,
+                                .pos = posw0.a,
                                 .color = colorw0.a,
                                 .normal = normalw0.a,
                                 .tex0 = tex0w0.a,
@@ -410,8 +414,10 @@ pub const ConvexHull = struct {
                         if (curedge.limitpospoint == null) {
                             //
                             //const lnpoint = curedge.limitnegpoint orelse unreachable;
+                            const posw0 = curedge.dir.homogenize(0.0);
+                            const tex0w0 = Vec2f.new(.{ curedge.dir.a[0], curedge.dir.a[2] });
                             (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
-                                .pos = curedge.dir.homogenize(0.0).a,
+                                .pos = posw0.a,
                                 .color = colorw0.a,
                                 .normal = normalw0.a,
                                 .tex0 = tex0w0.a,
