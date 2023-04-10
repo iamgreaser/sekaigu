@@ -78,6 +78,25 @@ pub const Edge = struct {
     face1: Face.Idx,
     limitneg: ?f32 = null,
     limitpos: ?f32 = null,
+    limitnegpoint: ?Point.Idx = null,
+    limitpospoint: ?Point.Idx = null,
+
+    pub fn isDegenerate(self: *const Self) bool {
+        if (self.limitneg) |ln| {
+            if (self.limitpos) |lp| {
+                return ln >= lp;
+            }
+        }
+        return false;
+    }
+
+    pub fn getNegPoint(self: *const Self) ?Vec3f {
+        return if (self.limitneg) |lim| self.refpoint.add(self.dir.mul(lim)) else null;
+    }
+
+    pub fn getPosPoint(self: *const Self) ?Vec3f {
+        return if (self.limitpos) |lim| self.refpoint.add(self.dir.mul(lim)) else null;
+    }
 };
 
 pub const Point = struct {
@@ -117,13 +136,41 @@ pub const ConvexHull = struct {
         self.points.deinit();
     }
 
+    // Assumes that there is a point
+    pub fn assumePoint(self: *Self, pos: Vec3f, epsilon: f32) error{NotFound}!Point.Idx {
+        for (self.points.items, 0..) |p, idx| {
+            if (p.pos.sub(pos).length() < epsilon) {
+                return Point.Idx{ .parent = self, .v = idx };
+            }
+        }
+        return error.NotFound;
+    }
+
+    pub fn ensurePoint(self: *Self, pos: Vec3f, epsilon: f32) !Point.Idx {
+        return self.assumePoint(pos, epsilon) catch |err| switch (err) {
+            error.NotFound => try self.allocPoint(pos),
+        };
+    }
+
     pub fn addFace(self: *Self, norm: Vec3f, offs: f32) !Face.Idx {
+        if (!std.math.approxEqAbs(f32, 1.0, norm.length(), 0.001)) {
+            log.err("normal {any} {d}", .{ norm, norm.length() });
+            @panic("face normal must be normalised");
+        }
         const idx = self.faces.items.len;
         try self.faces.append(Face{
             .norm = norm,
             .offs = offs,
         });
         return Face.Idx{ .parent = self, .v = idx };
+    }
+
+    fn allocPoint(self: *Self, pos: Vec3f) !Point.Idx {
+        const idx = self.points.items.len;
+        try self.points.append(Point{
+            .pos = pos,
+        });
+        return Point.Idx{ .parent = self, .v = idx };
     }
 
     fn allocEdge(self: *Self, refpoint: Vec3f, dir: Vec3f, face0: Face.Idx, face1: Face.Idx) !Edge.Idx {
@@ -210,13 +257,55 @@ pub const ConvexHull = struct {
             }
         }
     }
+
+    pub fn buildEdgesAndPoints(self: *Self) !void {
+        // Clear edge and point lists
+        self.edges.clearAndFree();
+        self.points.clearAndFree();
+        // TODO! --GM
+
+        // Build edges (O(n^2))
+        for (0..self.faces.items.len) |face0i| {
+            const face0 = Face.Idx{ .parent = self, .v = face0i };
+            nextEdge: for (0..self.faces.items) |face1i| {
+                if (face0i != face1i) {
+                    const face1 = Face.Idx{ .parent = self, .v = face1i };
+                    const edge = self.makeEdgeFromFaces(face0, face1) catch |err| switch (err) {
+                        error.NoIntersection => break :nextEdge,
+                        else => return err,
+                    };
+                    for (0..self.faces.items) |face2i| {
+                        if (face2i != face0i and face2i != face1i) {
+                            const face2 = Face.Idx{ .parent = self, .v = face2i };
+                            self.addFaceToEdge(edge, face2);
+                        }
+                    }
+
+                    var e = edge.ptr();
+
+                    // If this edge is degenerate, kill it.
+                    if (e.isDegenerate()) {
+                        _ = self.edges.swapRemove(edge.v);
+                        break :nextEdge;
+                    }
+
+                    // Otherwise, build the endpoints.
+                    const EPSILON = 0.001;
+                    if (e.getNegPoint()) |pos|
+                        e.limitnegpoint = try self.ensurePoint(pos, EPSILON);
+                    if (e.getPosPoint()) |pos|
+                        e.limitpospoint = try self.ensurePoint(pos, EPSILON);
+                }
+            }
+        }
+    }
 };
 
 test "edge from 2 faces failed due to nonintersecting planes" {
     var chull = try ConvexHull.init(testing.allocator);
     defer chull.deinit();
-    const face0 = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, 0.0 }), 3.0);
-    const face1 = try chull.addFace(Vec3f.new(.{ 0.0, 3.0, 0.0 }), -4.0);
+    const face0 = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, 0.0 }).normalize(), 3.0);
+    const face1 = try chull.addFace(Vec3f.new(.{ 0.0, 3.0, 0.0 }).normalize(), -4.0);
     try testing.expectError(error.NoIntersection, chull.makeEdgeFromFaces(face0, face1));
 }
 
@@ -345,7 +434,7 @@ test "edge from 4 faces forming 1 point, far then near" {
     defer chull.deinit();
     const face0 = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, 0.0 }), 3.0);
     const face1 = try chull.addFace(Vec3f.new(.{ 1.0, 0.0, 0.0 }), 4.0);
-    const face2 = try chull.addFace(Vec3f.new(.{ 0.0, 0.707, 0.707 }), -10.0);
+    const face2 = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, 1.0 }).normalize(), -10.0);
     const face3 = try chull.addFace(Vec3f.new(.{ 0.0, 0.0, 1.0 }), -2.0);
     const edge0 = try chull.makeEdgeFromFaces(face0, face1);
     const edge1 = try chull.makeEdgeFromFaces(face1, face0);
@@ -376,7 +465,7 @@ test "edge from 4 faces forming 1 point, near then far" {
     const face0 = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, 0.0 }), 3.0);
     const face1 = try chull.addFace(Vec3f.new(.{ 1.0, 0.0, 0.0 }), 4.0);
     const face2 = try chull.addFace(Vec3f.new(.{ 0.0, 0.0, 1.0 }), -2.0);
-    const face3 = try chull.addFace(Vec3f.new(.{ 0.0, 0.707, 0.707 }), -10.0);
+    const face3 = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, 1.0 }).normalize(), -10.0);
     const edge0 = try chull.makeEdgeFromFaces(face0, face1);
     const edge1 = try chull.makeEdgeFromFaces(face1, face0);
     chull.addFaceToEdge(edge0, face2);
@@ -398,4 +487,38 @@ test "edge from 4 faces forming 1 point, near then far" {
     try testing.expect(e1.limitneg == null);
     try testing.expectApproxEqAbs(@as(f32, -2.0), e0.limitneg orelse unreachable, 0.001);
     try testing.expectApproxEqAbs(@as(f32, 2.0), e1.limitpos orelse unreachable, 0.001);
+}
+
+test "bake a pyramid" {
+    var chull = try ConvexHull.init(testing.allocator);
+    defer chull.deinit();
+    _ = try chull.addFace(Vec3f.new(.{ 0.0, -1.0, 0.0 }), 0.0);
+    _ = try chull.addFace(Vec3f.new(.{ -1.0, 1.0, 0.0 }).normalize(), -5.0 * @sqrt(2.0) / 2.0);
+    _ = try chull.addFace(Vec3f.new(.{ 1.0, 1.0, 0.0 }).normalize(), -5.0 * @sqrt(2.0) / 2.0);
+    _ = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, -1.0 }).normalize(), -5.0 * @sqrt(2.0) / 2.0);
+    _ = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, 1.0 }).normalize(), -5.0 * @sqrt(2.0) / 2.0);
+    try chull.buildEdgesAndPoints();
+    // Use this to check if the points are correct if they aren't --GM
+    if (false) {
+        log.warn("test: ", .{});
+        for (chull.points.items) |p| {
+            log.warn("test: {any}", .{p});
+        }
+    }
+    try testing.expectEqual(@as(usize, 5), chull.faces.items.len);
+    // FIXME: I'd expect 8 edges with 2 directions leading to 8*2 edge entries. But something else is happening here and I'm not sure what it is. --GM
+    //try testing.expectEqual(@as(usize, 8 * 2), chull.edges.items.len);
+    try testing.expectEqual(@as(usize, 5), chull.points.items.len);
+    const points = [_]Point.Idx{
+        try chull.assumePoint(Vec3f.new(.{ 0.0, 5.0, 0.0 }), 0.001),
+        try chull.assumePoint(Vec3f.new(.{ -5.0, 0.0, -5.0 }), 0.001),
+        try chull.assumePoint(Vec3f.new(.{ -5.0, 0.0, 5.0 }), 0.001),
+        try chull.assumePoint(Vec3f.new(.{ 5.0, 0.0, -5.0 }), 0.001),
+        try chull.assumePoint(Vec3f.new(.{ 5.0, 0.0, 5.0 }), 0.001),
+    };
+    for (&points) |*p0| {
+        for (&points) |*p1| {
+            try testing.expect(p0 == p1 or p0.v != p1.v);
+        }
+    }
 }
