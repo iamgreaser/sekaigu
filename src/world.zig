@@ -393,7 +393,96 @@ pub const ConvexHull = struct {
 
             if (edgecount == 0) {
                 // 0 edges
-                if (true) @panic("TODO: 0-edge case --GM");
+
+                // NOTE: We are making a fan from the first point, and 4 infinite points in a row.
+                // So the first point MUST be finite.
+                // Otherwise we can get a 3-infinite point and that's... bad.
+
+                // Refpoint
+                {
+                    const posw1 = f0.norm.mul(-f0.offs).homogenize(1.0);
+                    const tex0w1 = Vec2f.new(.{ posw1.a[0], posw1.a[2] });
+                    (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
+                        .pos = posw1.a,
+                        .color = colorw1.a,
+                        .normal = normalw1.a,
+                        .tex0 = tex0w1.a,
+                    };
+                }
+
+                // Now we need to make some cross product based on which edge is most major.
+                const xlen = @fabs(f0.norm.a[0]);
+                const ylen = @fabs(f0.norm.a[1]);
+                const zlen = @fabs(f0.norm.a[2]);
+                const xsign = if (f0.norm.a[0] >= 0.0) @as(f32, 1.0) else @as(f32, -1.0);
+                const ysign = if (f0.norm.a[1] >= 0.0) @as(f32, 1.0) else @as(f32, -1.0);
+                const zsign = if (f0.norm.a[2] >= 0.0) @as(f32, 1.0) else @as(f32, -1.0);
+
+                var sidedir0: Vec3f = undefined;
+                var sidedir1: Vec3f = undefined;
+                // TODO: Extract this out for texcoord generation --GM
+                // TODO: Confirm the directions are accurate for texmapping a cube --GM
+                if (xlen >= ylen and xlen >= zlen) {
+                    // X
+                    sidedir0 = f0.norm.cross(Vec3f.new(.{ 0.0, 0.0, -1.0 }).mul(xsign));
+                    sidedir1 = f0.norm.cross(Vec3f.new(.{ 0.0, 1.0, 0.0 }));
+                } else if (ylen <= zlen) {
+                    // Y
+                    sidedir0 = f0.norm.cross(Vec3f.new(.{ 1.0, 0.0, 0.0 }));
+                    sidedir1 = f0.norm.cross(Vec3f.new(.{ 0.0, 0.0, -1.0 }).mul(ysign));
+                } else {
+                    // Z
+                    sidedir0 = f0.norm.cross(Vec3f.new(.{ 1.0, 0.0, 0.0 }).mul(zsign));
+                    sidedir1 = f0.norm.cross(Vec3f.new(.{ 0.0, 1.0, 0.0 }));
+                }
+
+                // -S0
+                {
+                    const posw0 = sidedir0.mul(-1.0).homogenize(0.0);
+                    const tex0w0 = Vec2f.new(.{ posw0.a[0], posw0.a[2] });
+                    (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
+                        .pos = posw0.a,
+                        .color = colorw0.a,
+                        .normal = normalw0.a,
+                        .tex0 = tex0w0.a,
+                    };
+                }
+
+                // -S1
+                {
+                    const posw0 = sidedir1.mul(-1.0).homogenize(0.0);
+                    const tex0w0 = Vec2f.new(.{ posw0.a[0], posw0.a[2] });
+                    (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
+                        .pos = posw0.a,
+                        .color = colorw0.a,
+                        .normal = normalw0.a,
+                        .tex0 = tex0w0.a,
+                    };
+                }
+
+                // +S0
+                {
+                    const posw0 = sidedir0.homogenize(0.0);
+                    const tex0w0 = Vec2f.new(.{ posw0.a[0], posw0.a[2] });
+                    (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
+                        .pos = posw0.a,
+                        .color = colorw0.a,
+                        .normal = normalw0.a,
+                        .tex0 = tex0w0.a,
+                    };
+                }
+
+                // +S1
+                {
+                    const posw0 = sidedir1.homogenize(0.0);
+                    const tex0w0 = Vec2f.new(.{ posw0.a[0], posw0.a[2] });
+                    (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
+                        .pos = posw0.a,
+                        .color = colorw0.a,
+                        .normal = normalw0.a,
+                        .tex0 = tex0w0.a,
+                    };
+                }
             } else if (edgecount == 1 or (edgecount == 2 and self.edges.items[firstedge].limitneg == null and self.edges.items[firstedge].limitpos == null)) {
                 // 1 or 2 infinite edges
                 const e0 = self.edges.items[firstedge];
@@ -583,6 +672,13 @@ pub const ConvexHull = struct {
                 (try self.meshindices.addOne()).* = @intCast(u16, firstmp);
                 (try self.meshindices.addOne()).* = @intCast(u16, fanidx + 0);
                 (try self.meshindices.addOne()).* = @intCast(u16, fanidx + 1);
+            }
+
+            // EDGE CASE: Add one more face for the 0-edge case
+            if (edgecount == 0) {
+                (try self.meshindices.addOne()).* = @intCast(u16, firstmp);
+                (try self.meshindices.addOne()).* = @intCast(u16, endmp - 1);
+                (try self.meshindices.addOne()).* = @intCast(u16, firstmp + 1);
             }
         }
     }
@@ -872,4 +968,49 @@ test "bake 3 planes connected by 2 parallel edges" {
     // TODO: Look further into meshpoints and meshindices --GM
     try testing.expectEqual(@as(usize, 1 * (4 + 6 + 4)), chull.meshpoints.items.len);
     try testing.expectEqual(@as(usize, 3 * (2 + 4 + 2)), chull.meshindices.items.len);
+}
+
+test "bake 1 plane, -Z" {
+    var chull = try ConvexHull.new(testing.allocator);
+    defer chull.deinit();
+    _ = try chull.addFace(Vec3f.new(.{ 0.0, 0.0, -1.0 }).normalize(), -5.0);
+    try chull.buildEdgesAndPoints();
+
+    try testing.expectEqual(@as(usize, 1), chull.faces.items.len);
+    try testing.expectEqual(@as(usize, 0 * 2), chull.edges.items.len);
+    try testing.expectEqual(@as(usize, 0), chull.points.items.len);
+
+    // TODO: Look further into meshpoints and meshindices --GM
+    try testing.expectEqual(@as(usize, 1 * (5)), chull.meshpoints.items.len);
+    try testing.expectEqual(@as(usize, 3 * (4)), chull.meshindices.items.len);
+}
+
+test "bake 1 plane, +Y" {
+    var chull = try ConvexHull.new(testing.allocator);
+    defer chull.deinit();
+    _ = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, 0.0 }).normalize(), -5.0);
+    try chull.buildEdgesAndPoints();
+
+    try testing.expectEqual(@as(usize, 1), chull.faces.items.len);
+    try testing.expectEqual(@as(usize, 0 * 2), chull.edges.items.len);
+    try testing.expectEqual(@as(usize, 0), chull.points.items.len);
+
+    // TODO: Look further into meshpoints and meshindices --GM
+    try testing.expectEqual(@as(usize, 1 * (5)), chull.meshpoints.items.len);
+    try testing.expectEqual(@as(usize, 3 * (4)), chull.meshindices.items.len);
+}
+
+test "bake 1 plane, +X" {
+    var chull = try ConvexHull.new(testing.allocator);
+    defer chull.deinit();
+    _ = try chull.addFace(Vec3f.new(.{ 1.0, 0.0, 0.0 }).normalize(), -5.0);
+    try chull.buildEdgesAndPoints();
+
+    try testing.expectEqual(@as(usize, 1), chull.faces.items.len);
+    try testing.expectEqual(@as(usize, 0 * 2), chull.edges.items.len);
+    try testing.expectEqual(@as(usize, 0), chull.points.items.len);
+
+    // TODO: Look further into meshpoints and meshindices --GM
+    try testing.expectEqual(@as(usize, 1 * (5)), chull.meshpoints.items.len);
+    try testing.expectEqual(@as(usize, 3 * (4)), chull.meshindices.items.len);
 }
