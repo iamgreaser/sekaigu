@@ -267,14 +267,14 @@ pub const ConvexHull = struct {
         // Build edges (O(n^2))
         for (0..self.faces.items.len) |face0i| {
             const face0 = Face.Idx{ .parent = self, .v = face0i };
-            nextEdge: for (0..self.faces.items) |face1i| {
+            nextEdge: for (0..self.faces.items.len) |face1i| {
                 if (face0i != face1i) {
                     const face1 = Face.Idx{ .parent = self, .v = face1i };
                     const edge = self.makeEdgeFromFaces(face0, face1) catch |err| switch (err) {
                         error.NoIntersection => break :nextEdge,
                         else => return err,
                     };
-                    for (0..self.faces.items) |face2i| {
+                    for (0..self.faces.items.len) |face2i| {
                         if (face2i != face0i and face2i != face1i) {
                             const face2 = Face.Idx{ .parent = self, .v = face2i };
                             self.addFaceToEdge(edge, face2);
@@ -285,16 +285,19 @@ pub const ConvexHull = struct {
 
                     // If this edge is degenerate, kill it.
                     if (e.isDegenerate()) {
+                        //log.warn("degenerate edge {any} {any} {any} {any} {any} {any}", .{ e.face0.ptr(), e.face1.ptr(), e.limitneg, e.limitpos, e.refpoint.a, e.dir.a });
+                        //log.warn("degenerate edge", .{});
+                        if (edge.v != self.edges.items.len - 1) @panic("attempted to remove nonfinal edge in bake!");
                         _ = self.edges.swapRemove(edge.v);
-                        break :nextEdge;
+                        if (edge.v != self.edges.items.len) @panic("attempted to remove more than one edge in bake!");
+                    } else {
+                        // Otherwise, build the endpoints.
+                        const EPSILON = 0.001;
+                        if (e.getNegPoint()) |pn|
+                            e.limitnegpoint = try self.ensurePoint(pn, EPSILON);
+                        if (e.getPosPoint()) |pp|
+                            e.limitpospoint = try self.ensurePoint(pp, EPSILON);
                     }
-
-                    // Otherwise, build the endpoints.
-                    const EPSILON = 0.001;
-                    if (e.getNegPoint()) |pos|
-                        e.limitnegpoint = try self.ensurePoint(pos, EPSILON);
-                    if (e.getPosPoint()) |pos|
-                        e.limitpospoint = try self.ensurePoint(pos, EPSILON);
                 }
             }
         }
@@ -506,8 +509,8 @@ test "bake a pyramid" {
         }
     }
     try testing.expectEqual(@as(usize, 5), chull.faces.items.len);
-    // FIXME: I'd expect 8 edges with 2 directions leading to 8*2 edge entries. But something else is happening here and I'm not sure what it is. --GM
-    //try testing.expectEqual(@as(usize, 8 * 2), chull.edges.items.len);
+    // Generates our 8 edges doubled... and 2 degenerate edges doubled which are based on the two pairs of opposing sloped faces.
+    try testing.expectEqual(@as(usize, 8 * 2), chull.edges.items.len);
     try testing.expectEqual(@as(usize, 5), chull.points.items.len);
     const points = [_]Point.Idx{
         try chull.assumePoint(Vec3f.new(.{ 0.0, 5.0, 0.0 }), 0.001),
