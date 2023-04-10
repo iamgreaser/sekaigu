@@ -183,7 +183,7 @@ var model_floor = Model(VA_P4HF_T2F_C3F_N3F, u16){
     },
 };
 
-var model_tetrahedron: ?Model(VA_P4HF_T2F_C3F_N3F, u16) = null;
+var model_pyramid: ?Model(VA_P4HF_T2F_C3F_N3F, u16) = null;
 
 var model_base = Model(VA_P4HF_T2F_C3F_N3F, u16){
     .va = &[_]VA_P4HF_T2F_C3F_N3F{
@@ -395,20 +395,20 @@ pub fn init() !void {
     }
 
     // Bake our hulls into meshes
-    model_tetrahedron = try Model(VA_P4HF_T2F_C3F_N3F, u16).fromConvexHullPlanes(main_allocator, &[_][4]f32{
-        .{ 0.0, -1.0, 0.0, 0.0 },
+    model_pyramid = try Model(VA_P4HF_T2F_C3F_N3F, u16).fromConvexHullPlanes(main_allocator, &[_][4]f32{
+        //.{ 0.0, -1.0, 0.0, 0.0 },
         .{ -1.0, 1.0, 0.0, -5.0 / 2.0 },
         .{ 1.0, 1.0, 0.0, -5.0 / 2.0 },
         .{ 0.0, 1.0, -1.0, -5.0 / 2.0 },
         .{ 0.0, 1.0, 1.0, -5.0 / 2.0 },
     });
-    //log.warn("baked {any}", .{(model_tetrahedron orelse unreachable).va});
-    //log.warn("baked {any}", .{(model_tetrahedron orelse unreachable).idx_list});
+    //log.warn("baked {any}", .{(model_pyramid orelse unreachable).va});
+    //log.warn("baked {any}", .{(model_pyramid orelse unreachable).idx_list});
 
     // Load the VBOs
     try model_base.load();
     try model_floor.load();
-    try (model_tetrahedron orelse unreachable).load();
+    try (model_pyramid orelse unreachable).load();
 
     // Bind our test texture
     try shader_uniforms.smp0.bindTexture(test_tex);
@@ -531,7 +531,7 @@ pub fn drawScene() !void {
                 .translate(-5.0, -2.0, -10.0)
                 .rotate(-model_zrot, 0.0, 1.0, 0.0);
             try shadermagic.loadUniforms(&shader_prog, @TypeOf(shader_uniforms), &shader_uniforms, &shader_prog_unicache);
-            try (model_tetrahedron orelse unreachable).draw(.Triangles);
+            try (model_pyramid orelse unreachable).draw(.Triangles);
         }
 
         {

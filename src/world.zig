@@ -378,16 +378,9 @@ pub const ConvexHull = struct {
                 // Open strip or closed loop
                 // w1 = finite, w0 = infinite
                 const normalw1 = f0.norm;
-
-                // Check if this is an open strip
-                for (firstedge..endedge) |edgei| {
-                    if (self.edges.items[edgei].limitneg == null) {
-                        if (true) @panic("TODO: Open strip case --GM");
-                    }
-                    if (self.edges.items[edgei].limitpos == null) {
-                        if (true) @panic("TODO: Open strip case --GM");
-                    }
-                }
+                const normalw0 = Vec3f.new(.{ 0, 0, 0 });
+                const colorw0 = Vec3f.new(.{ 0, 0, 0 });
+                const tex0w0 = Vec2f.new(.{ 0, 0 }); // what's this? oh dammit I have been on Neos too long --GM
 
                 // Add all points
                 const firstmp = self.meshpoints.items.len;
@@ -397,24 +390,59 @@ pub const ConvexHull = struct {
                         // Add the negative point to the edge list
                         const colorw1 = Vec3f.new(.{ 1.0, 1.0, 1.0 }); // TODO! --GM
                         const tex0w1 = Vec2f.new(.{ 0.0, 0.0 }); // TODO! --GM
-                        (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
-                            .pos = (curedge.limitnegpoint orelse unreachable).ptr().pos.homogenize(1.0).a,
-                            .color = colorw1.a,
-                            .normal = normalw1.a,
-                            .tex0 = tex0w1.a,
-                        };
+                        if (curedge.limitnegpoint) |lnpoint| {
+                            (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
+                                .pos = lnpoint.ptr().pos.homogenize(1.0).a,
+                                .color = colorw1.a,
+                                .normal = normalw1.a,
+                                .tex0 = tex0w1.a,
+                            };
+                        } else {
+                            (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
+                                .pos = curedge.dir.mul(-1.0).homogenize(0.0).a,
+                                .color = colorw0.a,
+                                .normal = normalw0.a,
+                                .tex0 = tex0w0.a,
+                            };
+                        }
+
+                        // If we have a positive point, we add another point
+                        if (curedge.limitpospoint == null) {
+                            //
+                            //const lnpoint = curedge.limitnegpoint orelse unreachable;
+                            (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
+                                .pos = curedge.dir.homogenize(0.0).a,
+                                .color = colorw0.a,
+                                .normal = normalw0.a,
+                                .tex0 = tex0w0.a,
+                            };
+                        }
 
                         // Find the next edge
-                        const nextpti = (curedge.limitpospoint orelse unreachable).v;
-                        curedge = gotEdge: {
-                            for (firstedge..endedge) |nexti| {
-                                const nextedge = self.edges.items[nexti];
-                                if ((nextedge.limitnegpoint orelse unreachable).v == nextpti) {
-                                    break :gotEdge nextedge;
+                        if (curedge.limitpospoint) |lppoint| {
+                            const nextpti = lppoint.v;
+                            curedge = gotEdge: {
+                                for (firstedge..endedge) |nexti| {
+                                    const nextedge = self.edges.items[nexti];
+                                    if (nextedge.limitnegpoint) |lnpoint| {
+                                        if (lnpoint.v == nextpti) {
+                                            break :gotEdge nextedge;
+                                        }
+                                    }
                                 }
-                            }
-                            @panic("edge loop not found");
-                        };
+                                @panic("edge loop not found");
+                            };
+                        } else {
+                            curedge = gotEdge: {
+                                for (firstedge..endedge) |nexti| {
+                                    const nextedge = self.edges.items[nexti];
+                                    if (nextedge.limitnegpoint == null) {
+                                        break :gotEdge nextedge;
+                                    }
+                                }
+                                @panic("edge loop not found");
+                            };
+                        }
                     }
                 }
                 const endmp = self.meshpoints.items.len;
@@ -652,5 +680,40 @@ test "bake a pyramid" {
         }
     }
 
-    // TODO: Look into meshpoints and meshindices --GM
+    // TODO: Look further into meshpoints and meshindices --GM
+    try testing.expectEqual(@as(usize, 1 * (4 + 3 + 3 + 3 + 3)), chull.meshpoints.items.len);
+    try testing.expectEqual(@as(usize, 3 * (2 + 1 + 1 + 1 + 1)), chull.meshindices.items.len);
+}
+
+test "bake an open baseless pyramid" {
+    var chull = try ConvexHull.new(testing.allocator);
+    defer chull.deinit();
+    _ = try chull.addFace(Vec3f.new(.{ -1.0, 1.0, 0.0 }).normalize(), -5.0 * @sqrt(2.0) / 2.0);
+    _ = try chull.addFace(Vec3f.new(.{ 1.0, 1.0, 0.0 }).normalize(), -5.0 * @sqrt(2.0) / 2.0);
+    _ = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, -1.0 }).normalize(), -5.0 * @sqrt(2.0) / 2.0);
+    _ = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, 1.0 }).normalize(), -5.0 * @sqrt(2.0) / 2.0);
+    try chull.buildEdgesAndPoints();
+    // Use this to check if the points are correct if they aren't --GM
+    if (false) {
+        log.warn("test: ", .{});
+        for (chull.points.items) |p| {
+            log.warn("test: {any}", .{p});
+        }
+    }
+    try testing.expectEqual(@as(usize, 4), chull.faces.items.len);
+    // Generates our 8 edges doubled... and 2 degenerate edges doubled which are based on the two pairs of opposing sloped faces.
+    try testing.expectEqual(@as(usize, 4 * 2), chull.edges.items.len);
+    try testing.expectEqual(@as(usize, 1), chull.points.items.len);
+    const points = [_]Point.Idx{
+        try chull.assumePoint(Vec3f.new(.{ 0.0, 5.0, 0.0 }), 0.001),
+    };
+    for (&points) |*p0| {
+        for (&points) |*p1| {
+            try testing.expect(p0 == p1 or p0.v != p1.v);
+        }
+    }
+
+    // TODO: Look further into meshpoints and meshindices --GM
+    try testing.expectEqual(@as(usize, 1 * (3 + 3 + 3 + 3)), chull.meshpoints.items.len);
+    try testing.expectEqual(@as(usize, 3 * (1 + 1 + 1 + 1)), chull.meshindices.items.len);
 }
