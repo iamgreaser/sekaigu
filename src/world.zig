@@ -116,41 +116,60 @@ pub const ConvexHull = struct {
     // TODO! --GM
     const Self = @This();
 
-    allocator: Allocator,
-    faces: ArrayList(Face),
-    edges: ArrayList(Edge),
-    points: ArrayList(Point),
-    meshpoints: ArrayList(VA_P4HF_T2F_C3F_N3F),
-    indices: ArrayList(u16),
+    allocator: Allocator = undefined,
+    faces: ArrayList(Face) = undefined,
+    edges: ArrayList(Edge) = undefined,
+    points: ArrayList(Point) = undefined,
+    meshpoints: ArrayList(VA_P4HF_T2F_C3F_N3F) = undefined,
+    meshindices: ArrayList(u16) = undefined,
 
-    pub fn init(allocator: Allocator) anyerror!Self {
+    pub fn new(allocator: Allocator) anyerror!Self {
         var faces = ArrayList(Face).init(allocator);
         errdefer faces.deinit();
         var edges = ArrayList(Edge).init(allocator);
         errdefer edges.deinit();
         var points = ArrayList(Point).init(allocator);
         errdefer points.deinit();
-        var indices = ArrayList(u16).init(allocator);
-        errdefer indices.deinit();
         var meshpoints = ArrayList(VA_P4HF_T2F_C3F_N3F).init(allocator);
         errdefer meshpoints.deinit();
+        var meshindices = ArrayList(u16).init(allocator);
+        errdefer meshindices.deinit();
 
         return Self{
             .allocator = allocator,
             .faces = faces,
             .edges = edges,
             .points = points,
-            .indices = indices,
             .meshpoints = meshpoints,
+            .meshindices = meshindices,
         };
+    }
+
+    pub fn init(self: *Self, allocator: Allocator) anyerror!void {
+        var faces = ArrayList(Face).init(allocator);
+        errdefer faces.deinit();
+        var edges = ArrayList(Edge).init(allocator);
+        errdefer edges.deinit();
+        var points = ArrayList(Point).init(allocator);
+        errdefer points.deinit();
+        var meshpoints = ArrayList(VA_P4HF_T2F_C3F_N3F).init(allocator);
+        errdefer meshpoints.deinit();
+        var meshindices = ArrayList(u16).init(allocator);
+        errdefer meshindices.deinit();
+        self.allocator = allocator;
+        self.faces = faces;
+        self.edges = edges;
+        self.points = points;
+        self.meshpoints = meshpoints;
+        self.meshindices = meshindices;
     }
 
     pub fn deinit(self: *Self) void {
         self.faces.deinit();
         self.edges.deinit();
         self.points.deinit();
-        self.indices.deinit();
         self.meshpoints.deinit();
+        self.meshindices.deinit();
     }
 
     // Assumes that there is a point
@@ -276,10 +295,11 @@ pub const ConvexHull = struct {
     }
 
     pub fn buildEdgesAndPoints(self: *Self) !void {
-        // Clear edge and point lists
+        // Clear most lists
         self.edges.clearAndFree();
         self.points.clearAndFree();
-        // TODO! --GM
+        self.meshpoints.clearAndFree();
+        self.meshindices.clearAndFree();
 
         // Build faces (O(f))
         for (0..self.faces.items.len) |face0i| {
@@ -383,6 +403,18 @@ pub const ConvexHull = struct {
                             .normal = normalw1.a,
                             .tex0 = tex0w1.a,
                         };
+
+                        // Find the next edge
+                        const nextpti = (curedge.limitpospoint orelse unreachable).v;
+                        curedge = gotEdge: {
+                            for (firstedge..endedge) |nexti| {
+                                const nextedge = self.edges.items[nexti];
+                                if ((nextedge.limitnegpoint orelse unreachable).v == nextpti) {
+                                    break :gotEdge nextedge;
+                                }
+                            }
+                            @panic("edge loop not found");
+                        };
                     }
                 }
                 const endmp = self.meshpoints.items.len;
@@ -390,9 +422,9 @@ pub const ConvexHull = struct {
 
                 // Form a fan
                 for (firstmp + 1..endmp - 1) |fanidx| {
-                    (try self.indices.addOne()).* = @intCast(u16, firstmp);
-                    (try self.indices.addOne()).* = @intCast(u16, fanidx + 0);
-                    (try self.indices.addOne()).* = @intCast(u16, fanidx + 1);
+                    (try self.meshindices.addOne()).* = @intCast(u16, firstmp);
+                    (try self.meshindices.addOne()).* = @intCast(u16, fanidx + 0);
+                    (try self.meshindices.addOne()).* = @intCast(u16, fanidx + 1);
                 }
             }
         }
@@ -400,7 +432,7 @@ pub const ConvexHull = struct {
 };
 
 test "edge from 2 faces failed due to nonintersecting planes" {
-    var chull = try ConvexHull.init(testing.allocator);
+    var chull = try ConvexHull.new(testing.allocator);
     defer chull.deinit();
     const face0 = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, 0.0 }).normalize(), 3.0);
     const face1 = try chull.addFace(Vec3f.new(.{ 0.0, 3.0, 0.0 }).normalize(), -4.0);
@@ -408,7 +440,7 @@ test "edge from 2 faces failed due to nonintersecting planes" {
 }
 
 test "edge from 2 faces" {
-    var chull = try ConvexHull.init(testing.allocator);
+    var chull = try ConvexHull.new(testing.allocator);
     defer chull.deinit();
     const face0 = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, 0.0 }), 3.0);
     const face1 = try chull.addFace(Vec3f.new(.{ 1.0, 0.0, 0.0 }), 4.0);
@@ -443,7 +475,7 @@ test "edge from 2 faces" {
 }
 
 test "edge from 3 faces forming 1 point" {
-    var chull = try ConvexHull.init(testing.allocator);
+    var chull = try ConvexHull.new(testing.allocator);
     defer chull.deinit();
     const face0 = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, 0.0 }), 3.0);
     const face1 = try chull.addFace(Vec3f.new(.{ 1.0, 0.0, 0.0 }), 4.0);
@@ -470,7 +502,7 @@ test "edge from 3 faces forming 1 point" {
 }
 
 test "edge from 4 faces forming 2 points" {
-    var chull = try ConvexHull.init(testing.allocator);
+    var chull = try ConvexHull.new(testing.allocator);
     defer chull.deinit();
     const face0 = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, 0.0 }), 3.0);
     const face1 = try chull.addFace(Vec3f.new(.{ 1.0, 0.0, 0.0 }), 4.0);
@@ -501,7 +533,7 @@ test "edge from 4 faces forming 2 points" {
 }
 
 test "edge from 4 faces forming degenerate" {
-    var chull = try ConvexHull.init(testing.allocator);
+    var chull = try ConvexHull.new(testing.allocator);
     defer chull.deinit();
     const face0 = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, 0.0 }), 3.0);
     const face1 = try chull.addFace(Vec3f.new(.{ 1.0, 0.0, 0.0 }), 4.0);
@@ -528,7 +560,7 @@ test "edge from 4 faces forming degenerate" {
 }
 
 test "edge from 4 faces forming 1 point, far then near" {
-    var chull = try ConvexHull.init(testing.allocator);
+    var chull = try ConvexHull.new(testing.allocator);
     defer chull.deinit();
     const face0 = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, 0.0 }), 3.0);
     const face1 = try chull.addFace(Vec3f.new(.{ 1.0, 0.0, 0.0 }), 4.0);
@@ -558,7 +590,7 @@ test "edge from 4 faces forming 1 point, far then near" {
 }
 
 test "edge from 4 faces forming 1 point, near then far" {
-    var chull = try ConvexHull.init(testing.allocator);
+    var chull = try ConvexHull.new(testing.allocator);
     defer chull.deinit();
     const face0 = try chull.addFace(Vec3f.new(.{ 0.0, 1.0, 0.0 }), 3.0);
     const face1 = try chull.addFace(Vec3f.new(.{ 1.0, 0.0, 0.0 }), 4.0);
@@ -588,7 +620,7 @@ test "edge from 4 faces forming 1 point, near then far" {
 }
 
 test "bake a pyramid" {
-    var chull = try ConvexHull.init(testing.allocator);
+    var chull = try ConvexHull.new(testing.allocator);
     defer chull.deinit();
     _ = try chull.addFace(Vec3f.new(.{ 0.0, -1.0, 0.0 }), 0.0);
     _ = try chull.addFace(Vec3f.new(.{ -1.0, 1.0, 0.0 }).normalize(), -5.0 * @sqrt(2.0) / 2.0);
@@ -619,4 +651,6 @@ test "bake a pyramid" {
             try testing.expect(p0 == p1 or p0.v != p1.v);
         }
     }
+
+    // TODO: Look into meshpoints and meshindices --GM
 }

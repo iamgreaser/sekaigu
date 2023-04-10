@@ -2,7 +2,13 @@ const builtin = @import("builtin");
 const std = @import("std");
 const log = std.log.scoped(.main);
 const time = std.time;
+const Allocator = std.mem.Allocator;
 const C = @import("c.zig");
+
+const main_allocator = if (builtin.target.isWasm())
+    std.heap.wasm_allocator
+else
+    std.heap.c_allocator;
 
 // FIXME: The dispatch seems borked --GM
 //const GfxContext = @import("GfxContext.zig");
@@ -21,6 +27,7 @@ const Mat2f = linalg.Mat2f;
 const Mat3f = linalg.Mat3f;
 const Mat4f = linalg.Mat4f;
 const world = @import("world.zig");
+const ConvexHull = world.ConvexHull;
 
 const MAX_FPS = 60;
 const NSEC_PER_FRAME = @divFloor(time.ns_per_s, MAX_FPS);
@@ -60,14 +67,68 @@ pub const std_options = if (builtin.target.isWasm()) struct {
 
 pub const VA_P4HF_T2F_C3F_N3F = world.VA_P4HF_T2F_C3F_N3F;
 
-pub fn Model(comptime VAType: type, comptime IdxType: type) type {
+pub fn Model(comptime VAType: type, comptime IndexT: type) type {
     return struct {
         pub const Self = @This();
 
         va: []const VAType,
-        idx_list: []const IdxType,
+        idx_list: []const IndexT,
+        allocator: ?Allocator = null,
+        va_owned: ?[]VAType = null,
+        idx_list_owned: ?[]IndexT = null,
         va_vbo: gl.BO = gl.BO.Dummy,
         idx_vbo: gl.BO = gl.BO.Dummy,
+
+        pub fn fromConvexHullPlanes(allocator: Allocator, normals: []const [4]f32) !Self {
+            var chull: *ConvexHull = try allocator.create(ConvexHull);
+            defer allocator.destroy(chull);
+            try chull.init(allocator);
+            defer chull.deinit();
+            for (normals) |normal| {
+                const x = normal[0];
+                const y = normal[1];
+                const z = normal[2];
+                const offs = normal[3];
+                const length = @sqrt(x * x + y * y + z * z);
+                _ = try chull.addFace(Vec3f.new(.{ x / length, y / length, z / length }).normalize(), offs * length);
+            }
+            try chull.buildEdgesAndPoints();
+            log.info("Baked convex hull: {} points, {} indices", .{
+                chull.meshpoints.items.len,
+                chull.meshindices.items.len,
+            });
+            return Self.fromConvexHull(allocator, chull);
+        }
+
+        pub fn fromConvexHull(allocator: Allocator, chull: *ConvexHull) !Self {
+            var va = try allocator.alloc(VAType, chull.meshpoints.items.len);
+            errdefer allocator.free(va);
+            std.mem.copy(VAType, va, chull.meshpoints.items);
+            var idx_list = try allocator.alloc(IndexT, chull.meshindices.items.len);
+            errdefer allocator.free(idx_list);
+            std.mem.copy(IndexT, idx_list, chull.meshindices.items);
+            var result = Self{
+                .allocator = allocator,
+                .va = va,
+                .va_owned = va,
+                .idx_list = idx_list,
+                .idx_list_owned = idx_list,
+            };
+            return result;
+        }
+
+        pub fn deinit(self: *Self) !void {
+            if (self.allocator != null) |allocator| {
+                if (self.va_owned != null) |p| {
+                    allocator.free(p);
+                    self.va_owned = null;
+                }
+                if (self.idx_list_owned != null) |p| {
+                    allocator.free(p);
+                    self.idx_list_owned = null;
+                }
+            }
+        }
 
         pub fn load(self: *Self) !void {
             {
@@ -80,7 +141,7 @@ pub fn Model(comptime VAType: type, comptime IdxType: type) type {
                 self.idx_vbo = try gl.BO.genBuffer();
                 try gl.bindBuffer(.ElementArrayBuffer, self.idx_vbo);
                 defer gl.unbindBuffer(.ElementArrayBuffer) catch {};
-                try gl.bufferData(.ElementArrayBuffer, IdxType, self.idx_list, .StaticDraw);
+                try gl.bufferData(.ElementArrayBuffer, IndexT, self.idx_list, .StaticDraw);
             }
         }
 
@@ -102,7 +163,7 @@ pub fn Model(comptime VAType: type, comptime IdxType: type) type {
                 try gl.vertexAttribPointer(i, VAType, field.name);
                 try gl.enableVertexAttribArray(i);
             }
-            try gl.drawElements(mode, 0, self.idx_list.len, IdxType);
+            try gl.drawElements(mode, 0, self.idx_list.len, IndexT);
             //try gl.drawArrays(mode, 0, self.va.len);
         }
     };
@@ -121,6 +182,8 @@ var model_floor = Model(VA_P4HF_T2F_C3F_N3F, u16){
         0, 3, 1,
     },
 };
+
+var model_tetrahedron: ?Model(VA_P4HF_T2F_C3F_N3F, u16) = null;
 
 var model_base = Model(VA_P4HF_T2F_C3F_N3F, u16){
     .va = &[_]VA_P4HF_T2F_C3F_N3F{
@@ -219,7 +282,7 @@ const shader_src = shadermagic.makeShaderSource(.{
 var shader_prog: gl.Program = gl.Program.Dummy;
 var shader_prog_unicache: shadermagic.UniformIdxCache(@TypeOf(shader_uniforms)) = .{};
 
-const floor_shader_src = shadermagic.makeShaderSource(.{
+const textured_src = shadermagic.makeShaderSource(.{
     .uniform_type = @TypeOf(shader_uniforms),
     .attrib_type = VA_P4HF_T2F_C3F_N3F,
     .varyings = &[_]shadermagic.MakeShaderSourceOptions.FieldEntry{
@@ -271,8 +334,8 @@ const floor_shader_src = shadermagic.makeShaderSource(.{
         \\}
     ),
 });
-var floor_shader_prog: gl.Program = gl.Program.Dummy;
-var floor_shader_prog_unicache: shadermagic.UniformIdxCache(@TypeOf(shader_uniforms)) = .{};
+var textured_prog: gl.Program = gl.Program.Dummy;
+var textured_prog_unicache: shadermagic.UniformIdxCache(@TypeOf(shader_uniforms)) = .{};
 
 var test_tex: gl.Texture2D = gl.Texture2D.Dummy;
 var gfx: GfxContext = undefined;
@@ -290,7 +353,7 @@ pub fn init() !void {
 
     // Compile the shaders
     shader_prog = try shader_src.compileProgram();
-    floor_shader_prog = try floor_shader_src.compileProgram();
+    textured_prog = try textured_src.compileProgram();
 
     // Generate a test texture
     test_tex = try gl.Texture2D.genTexture();
@@ -331,9 +394,21 @@ pub fn init() !void {
         try gl.Texture2D.generateMipmap();
     }
 
+    // Bake our hulls into meshes
+    model_tetrahedron = try Model(VA_P4HF_T2F_C3F_N3F, u16).fromConvexHullPlanes(main_allocator, &[_][4]f32{
+        .{ 0.0, -1.0, 0.0, 0.0 },
+        .{ -1.0, 1.0, 0.0, -5.0 / 2.0 },
+        .{ 1.0, 1.0, 0.0, -5.0 / 2.0 },
+        .{ 0.0, 1.0, -1.0, -5.0 / 2.0 },
+        .{ 0.0, 1.0, 1.0, -5.0 / 2.0 },
+    });
+    //log.warn("baked {any}", .{(model_tetrahedron orelse unreachable).va});
+    //log.warn("baked {any}", .{(model_tetrahedron orelse unreachable).idx_list});
+
     // Load the VBOs
     try model_base.load();
     try model_floor.load();
+    try (model_tetrahedron orelse unreachable).load();
 
     // Bind our test texture
     try shader_uniforms.smp0.bindTexture(test_tex);
@@ -450,6 +525,16 @@ pub fn drawScene() !void {
         }
 
         {
+            try gl.useProgram(shader_prog);
+            defer gl.unuseProgram() catch {};
+            shader_uniforms.mmodel = Mat4f.I
+                .translate(-5.0, -2.0, -10.0)
+                .rotate(-model_zrot, 0.0, 1.0, 0.0);
+            try shadermagic.loadUniforms(&shader_prog, @TypeOf(shader_uniforms), &shader_uniforms, &shader_prog_unicache);
+            try (model_tetrahedron orelse unreachable).draw(.Triangles);
+        }
+
+        {
             defer gl.activeTexture(0) catch {};
             try gl.activeTexture(0);
             defer {
@@ -459,11 +544,11 @@ pub fn drawScene() !void {
             }
             try gl.Texture2D.bindTexture(test_tex);
 
-            try gl.useProgram(floor_shader_prog);
+            try gl.useProgram(textured_prog);
             defer gl.unuseProgram() catch {};
             shader_uniforms.mmodel = Mat4f.I
                 .translate(0.0, -2.0, 0.0);
-            try shadermagic.loadUniforms(&floor_shader_prog, @TypeOf(shader_uniforms), &shader_uniforms, &floor_shader_prog_unicache);
+            try shadermagic.loadUniforms(&textured_prog, @TypeOf(shader_uniforms), &shader_uniforms, &textured_prog_unicache);
             try model_floor.draw(.Triangles);
         }
     }
