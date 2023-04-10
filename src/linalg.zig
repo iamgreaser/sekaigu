@@ -1,7 +1,7 @@
 const std = @import("std");
 const log = std.log.scoped(.linalg);
 
-fn Vec(comptime N: usize, comptime T: type) type {
+pub fn Vec(comptime N: usize, comptime T: type) type {
     return struct {
         const Self = @This();
         a: [N]T,
@@ -67,6 +67,15 @@ fn Vec(comptime N: usize, comptime T: type) type {
 
         pub fn normalize(self: Self) Self {
             return self.mul(1.0 / @max(0.00001, self.length()));
+        }
+
+        pub fn homogenize(self: Self, divFac: T) Vec(N + 1, T) {
+            var result = Vec(N + 1, T){ .a = undefined };
+            for (0..N) |i| {
+                result.a[i] = self.a[i];
+            }
+            result.a[N] = divFac;
+            return result;
         }
 
         pub fn cross(self: Self, other: Self) Self {

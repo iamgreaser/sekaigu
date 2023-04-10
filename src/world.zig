@@ -22,6 +22,13 @@ const Mat2f = linalg.Mat2f;
 const Mat3f = linalg.Mat3f;
 const Mat4f = linalg.Mat4f;
 
+pub const VA_P4HF_T2F_C3F_N3F = struct {
+    pos: [4]f32,
+    tex0: [2]f32,
+    color: [3]f32,
+    normal: [3]f32,
+};
+
 pub fn IdxType(comptime Parent: type, comptime alfield: []const u8, comptime T: type) type {
     return struct {
         const Self = @This();
@@ -113,6 +120,8 @@ pub const ConvexHull = struct {
     faces: ArrayList(Face),
     edges: ArrayList(Edge),
     points: ArrayList(Point),
+    meshpoints: ArrayList(VA_P4HF_T2F_C3F_N3F),
+    indices: ArrayList(u16),
 
     pub fn init(allocator: Allocator) anyerror!Self {
         var faces = ArrayList(Face).init(allocator);
@@ -121,12 +130,18 @@ pub const ConvexHull = struct {
         errdefer edges.deinit();
         var points = ArrayList(Point).init(allocator);
         errdefer points.deinit();
+        var indices = ArrayList(u16).init(allocator);
+        errdefer indices.deinit();
+        var meshpoints = ArrayList(VA_P4HF_T2F_C3F_N3F).init(allocator);
+        errdefer meshpoints.deinit();
 
         return Self{
             .allocator = allocator,
             .faces = faces,
             .edges = edges,
             .points = points,
+            .indices = indices,
+            .meshpoints = meshpoints,
         };
     }
 
@@ -134,6 +149,8 @@ pub const ConvexHull = struct {
         self.faces.deinit();
         self.edges.deinit();
         self.points.deinit();
+        self.indices.deinit();
+        self.meshpoints.deinit();
     }
 
     // Assumes that there is a point
@@ -264,8 +281,11 @@ pub const ConvexHull = struct {
         self.points.clearAndFree();
         // TODO! --GM
 
-        // Build edges (O(n^2))
+        // Build faces (O(f))
         for (0..self.faces.items.len) |face0i| {
+            const firstedge = self.edges.items.len;
+
+            // Build edges (O(f^2))
             const face0 = Face.Idx{ .parent = self, .v = face0i };
             nextEdge: for (0..self.faces.items.len) |face1i| {
                 if (face0i != face1i) {
@@ -298,6 +318,81 @@ pub const ConvexHull = struct {
                         if (e.getPosPoint()) |pp|
                             e.limitpospoint = try self.ensurePoint(pp, EPSILON);
                     }
+                }
+            }
+
+            // Build our edge list
+            const endedge = self.edges.items.len;
+            const edgecount = endedge - firstedge;
+            //log.warn("face edges {}..{} {} --- {any}", .{ firstedge, endedge, edgecount, face0.ptr() });
+
+            //
+            // Look for edge cases (har har)
+            //
+            // AFAIK this is how it works:
+            //
+            // The cases are:
+            // - 0 edges (project the origin, add 3 or 4 infinite points, then make triangles which all touch the origin)
+            // - 1 infinite edge (use the reference point, add 2 infinite points on the line, add 1 infinite point perpendicular while inline, then make 2 triangles all touching the reference point)
+            // - 2 infinite opposing edges (use 1 reference point, add 4 infinite points on both lines, then make 3 triangles all touching the reference point we used)
+            // - Open strip (add 2 infinite points to represent the infinites, then build a strip from the infinite line down to the middle)
+            // - Closed loop (without adding our infinite points, build a strip starting from the first point and last point down to the middle)
+            // We can do both of these in the exact same way EXCEPT we need to create 2 infinite points.
+            //
+            // But first, special cases!
+            //
+
+            const f0 = face0.ptr();
+
+            if (edgecount == 0) {
+                // 0 edges
+                if (true) @panic("TODO: 0-edge case --GM");
+            } else if (edgecount == 1) {
+                // 1 infinite edge
+                if (!(self.edges.items[firstedge].limitneg == null and self.edges.items[firstedge].limitpos == null)) @panic("Invalid special case!");
+                if (true) @panic("TODO: 1-infinte-edge case --GM");
+            } else if (edgecount == 2 and self.edges.items[firstedge].limitneg == null and self.edges.items[firstedge].limitpos == null) {
+                // 2 infinite edges
+                if (true) @panic("TODO: 2-infinite-edge case --GM");
+            } else {
+                // Open strip or closed loop
+                // w1 = finite, w0 = infinite
+                const normalw1 = f0.norm;
+
+                // Check if this is an open strip
+                for (firstedge..endedge) |edgei| {
+                    if (self.edges.items[edgei].limitneg == null) {
+                        if (true) @panic("TODO: Open strip case --GM");
+                    }
+                    if (self.edges.items[edgei].limitpos == null) {
+                        if (true) @panic("TODO: Open strip case --GM");
+                    }
+                }
+
+                // Add all points
+                const firstmp = self.meshpoints.items.len;
+                {
+                    var curedge = self.edges.items[firstedge];
+                    for (0..edgecount) |_| {
+                        // Add the negative point to the edge list
+                        const colorw1 = Vec3f.new(.{ 1.0, 1.0, 1.0 }); // TODO! --GM
+                        const tex0w1 = Vec2f.new(.{ 0.0, 0.0 }); // TODO! --GM
+                        (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
+                            .pos = (curedge.limitnegpoint orelse unreachable).ptr().pos.homogenize(1.0).a,
+                            .color = colorw1.a,
+                            .normal = normalw1.a,
+                            .tex0 = tex0w1.a,
+                        };
+                    }
+                }
+                const endmp = self.meshpoints.items.len;
+                //const mpcount = endmp - firstmp;
+
+                // Form a fan
+                for (firstmp + 1..endmp - 1) |fanidx| {
+                    (try self.indices.addOne()).* = @intCast(u16, firstmp);
+                    (try self.indices.addOne()).* = @intCast(u16, fanidx + 0);
+                    (try self.indices.addOne()).* = @intCast(u16, fanidx + 1);
                 }
             }
         }
