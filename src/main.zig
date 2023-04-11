@@ -5,7 +5,7 @@ const time = std.time;
 const Allocator = std.mem.Allocator;
 const C = @import("c.zig");
 
-const main_allocator = if (builtin.target.isWasm())
+pub const main_allocator = if (builtin.target.isWasm())
     std.heap.wasm_allocator
 else
     std.heap.c_allocator;
@@ -16,6 +16,26 @@ const GfxContext = if (builtin.target.isWasm())
     @import("GfxContext/web.zig")
 else
     @import("GfxContext/sdl.zig");
+
+const WebServer = if (builtin.target.isWasm())
+    struct {
+        const Self = @This();
+
+        pub fn new(allocator: Allocator) !Self {
+            _ = allocator;
+            return Self{};
+        }
+
+        pub fn free(self: *Self) void {
+            _ = self;
+        }
+
+        pub fn update(self: *Self) !void {
+            _ = self;
+        }
+    }
+else
+    @import("WebServer.zig");
 
 const gl = @import("gl.zig");
 const shadermagic = @import("shadermagic.zig");
@@ -339,6 +359,7 @@ var textured_prog_unicache: shadermagic.UniformIdxCache(@TypeOf(shader_uniforms)
 
 var test_tex: gl.Texture2D = gl.Texture2D.Dummy;
 var gfx: GfxContext = undefined;
+var webserver: WebServer = undefined;
 
 var timer: if (TIMERS_EXIST) time.Timer else @TypeOf(DUMMY_TIMER) = undefined;
 var time_accum: u64 = 0;
@@ -350,6 +371,10 @@ pub fn init() !void {
     gfx = try GfxContext.new();
     try gfx.init();
     errdefer gfx.free();
+
+    // Create a web server
+    webserver = try WebServer.new(main_allocator);
+    errdefer webserver.free();
 
     // Compile the shaders
     shader_prog = try shader_src.compileProgram();
@@ -423,6 +448,7 @@ pub fn init() !void {
 }
 
 pub fn destroy() void {
+    webserver.free();
     gfx.free();
 }
 
@@ -436,6 +462,7 @@ pub fn main() !void {
         try drawScene();
         gfx.flip();
         try tickScene(dt);
+        try webserver.update();
         if (try gfx.applyEvents(@TypeOf(keys), &keys)) {
             break :done;
         }
@@ -591,7 +618,7 @@ pub fn updateTime() !f32 {
         {
             //log.debug("FPS: {}", .{fps_counter});
             var buf: [128]u8 = undefined;
-            gfx.setTitle(try std.fmt.bufPrintZ(&buf, "cockel pre-alpha | FPS: {}", .{fps_counter}));
+            gfx.setTitle(try std.fmt.bufPrintZ(&buf, "sekaigu pre-alpha | FPS: {}", .{fps_counter}));
         }
         if (fps_time_accum >= (time.ns_per_s * 1) * 2) {
             log.warn("FPS counter slipped! Time wasted (nsec): {}", .{fps_time_accum});

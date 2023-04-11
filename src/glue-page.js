@@ -201,7 +201,7 @@ const KEYMAP = {
   "Space": "SPACE",
 };
 
-WebAssembly.instantiateStreaming(fetch("cockel.wasm"), importObject).then(
+WebAssembly.instantiateStreaming(fetch("sekaigu.wasm"), importObject).then(
   (obj) => {
     console.log("Fetched!");
     console.log(obj.instance.exports);

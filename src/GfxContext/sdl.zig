@@ -52,7 +52,7 @@ pub fn init(self: *Self) anyerror!void {
     // Create a window
     log.info("Setting up a window", .{});
     if (C.SDL_CreateWindow(
-        "cockel pre-alpha",
+        "sekaigu pre-alpha",
         C.SDL_WINDOWPOS_UNDEFINED,
         C.SDL_WINDOWPOS_UNDEFINED,
         self.width,
