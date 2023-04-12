@@ -1,10 +1,13 @@
 const std = @import("std");
 const log = std.log.scoped(.main);
+const Allocator = std.mem.Allocator;
 
+const INCHARMAXWIDTH = 16;
 const INCHARHEIGHT = 16;
 
 pub const std_options = struct {
     pub const log_level = .info;
+    //pub const log_level = .debug;
 };
 
 // We can potentially use up to 16 layers and use RGBA 4:4:4:4 as our internal format.
@@ -14,13 +17,24 @@ pub const std_options = struct {
 // 01 = * INVALID * - temporarily used when allocating space
 // 10 = Allocated 0
 // 11 = Allocated 1
-var atlas_usedmask: []u8 = undefined;
+const XSpan = struct {
+    const Self = @This();
+    xoffs: u16,
+    xlen: u16,
+    prevptr: *?*XSpan,
+    next: ?*XSpan,
+};
+var atlas_xspan_heads: []?*XSpan = undefined;
+
+var prev_y_per_size: [INCHARHEIGHT][INCHARMAXWIDTH]usize = [1][INCHARMAXWIDTH]usize{
+    [1]usize{0} ** INCHARMAXWIDTH,
+} ** INCHARHEIGHT;
+
 var atlas_data: []u8 = undefined;
 var atlas_pitch: usize = 0;
 var atlas_width: usize = 0;
 var atlas_height: usize = 0;
 var atlas_layers: usize = 0;
-var atlas_first_empty_x: []usize = undefined;
 
 const CharEntry = struct {
     char_idx: u32,
@@ -50,6 +64,7 @@ const CharEntry = struct {
 var char_entries: std.ArrayList(CharEntry) = undefined;
 var empties_8: std.ArrayList(u21) = undefined;
 var empties_16: std.ArrayList(u21) = undefined;
+var glyphs_were_lost: bool = false;
 
 pub fn main() !void {
     const AllocatorType = std.heap.GeneralPurposeAllocator(.{
@@ -76,16 +91,26 @@ pub fn main() !void {
     defer empties_16.clearAndFree();
 
     // Give this some extra space for overflow
-    atlas_usedmask = try allocator.alloc(u8, atlas_pitch * atlas_height * atlas_layers + 4);
-    defer allocator.free(atlas_usedmask);
-    std.mem.set(u8, atlas_usedmask, 0);
     atlas_data = try allocator.alloc(u8, atlas_pitch * atlas_height * atlas_layers + 4);
     defer allocator.free(atlas_data);
     std.mem.set(u8, atlas_data, 0);
-    log.info("Allocated size: {d} bytes x2", .{atlas_usedmask.len});
-    atlas_first_empty_x = try allocator.alloc(usize, atlas_height * atlas_layers);
-    defer allocator.free(atlas_first_empty_x);
-    std.mem.set(usize, atlas_first_empty_x, 0);
+    log.info("Allocated size: {d} bytes x2", .{atlas_data.len});
+
+    atlas_xspan_heads = try allocator.alloc(?*XSpan, atlas_height * atlas_layers);
+    defer allocator.free(atlas_xspan_heads);
+    std.mem.set(?*XSpan, atlas_xspan_heads, null);
+    defer destroyXSpanChains(allocator);
+    for (atlas_xspan_heads) |*xspanptr| {
+        var firstspan = try allocator.create(XSpan);
+        errdefer allocator.destroy(firstspan);
+        firstspan.* = XSpan{
+            .xoffs = 0,
+            .xlen = @intCast(u16, atlas_width),
+            .prevptr = xspanptr,
+            .next = null,
+        };
+        xspanptr.* = firstspan;
+    }
 
     // Load our glyphs
     for (std.os.argv[7..]) |infname| {
@@ -104,14 +129,17 @@ pub fn main() !void {
             continue :charInputs;
         }
         log.debug("Parsing {d}/{d} (-{d}): {x}, origin {d}, {d}, size {d} x {d}", .{ charsdone, i, i - charsdone, ce.char_idx, ce.dstxoffs, ce.dstyoffs, ce.xsize_m1 + 1, ce.ysize_m1 + 1 });
-        insertCharData(ce) catch |err| switch (err) {
+        insertCharData(allocator, ce) catch |err| switch (err) {
             error.CharacterDidNotFit => {
                 log.err("Failed to allocate character {x} in atlas", .{ce.char_idx});
+                glyphs_were_lost = true;
                 lastbadxsize_m1 = ce.xsize_m1;
                 lastbadysize_m1 = ce.ysize_m1;
                 continue :charInputs;
             },
-            //else => { return err; },
+            else => {
+                return err;
+            },
         };
         charsdone += 1;
     }
@@ -218,6 +246,19 @@ pub fn main() !void {
     }
 
     log.info("Done", .{});
+    if (glyphs_were_lost) {
+        log.err("Glyphs were lost, exiting with an error", .{});
+        std.process.exit(1);
+    }
+}
+
+fn destroyXSpanChains(allocator: Allocator) void {
+    for (atlas_xspan_heads) |*xsp| {
+        while (xsp.*) |xspan| {
+            xsp.* = xspan.next;
+            allocator.destroy(xspan);
+        }
+    }
 }
 
 fn appendFilenameToAtlas(fname: []const u8) !void {
@@ -312,42 +353,56 @@ pub fn parseCharData(comptime RowLen: comptime_int, char_idx: u21, char_str: []c
     });
 }
 
-pub fn insertCharData(ce: *CharEntry) !void {
+pub fn insertCharData(allocator: Allocator, ce: *CharEntry) !void {
     const charbuf: []const u32 = &ce.charbuf;
     const char_idx = ce.char_idx;
     const xlen: usize = ce.xsize_m1 + 1;
     const ylen: usize = ce.ysize_m1 + 1;
-    const xmask: u32 = 0 -% (@as(u32, 0x80000000) >> @intCast(u5, xlen - 1));
+    //const xmask: u32 = 0 -% (@as(u32, 0x80000000) >> @intCast(u5, xlen - 1));
 
     // Now scan the entire atlas for an empty space
     var bestx: usize = 0;
     var besty: usize = 0;
     var bestl: usize = 0;
+    var spanlistbuf: [INCHARHEIGHT]*XSpan = undefined;
     foundSpace: {
         for (0..atlas_layers) |cl| {
             const loffs: usize = cl * atlas_height;
+            const firsty = @max(prev_y_per_size[ylen - 1][xlen - 1], loffs + 0);
             const lasty = loffs + atlas_height - ylen;
-            for (loffs + 0..lasty) |cy| {
-                const firstx = atlas_first_empty_x[cy];
-                const lastx = atlas_width - xlen;
-                if (firstx < lastx) {
-                    for (firstx..lastx) |cx| {
-                        const inshift: u5 = @intCast(u5, cx & 0b111);
-                        const cmask = xmask >> inshift;
-                        posFail: {
-                            const aoffs_base = (cy * atlas_pitch) + (cx >> 3);
-                            for (0..ylen) |sy| {
-                                const aoffs = aoffs_base + (sy * atlas_pitch);
-                                const am: u32 = (@as(u32, atlas_usedmask[aoffs + 0]) << 24) | (@as(u32, atlas_usedmask[aoffs + 1]) << 16) | (@as(u32, atlas_usedmask[aoffs + 2]) << 8);
-                                if ((am & cmask) != 0) {
-                                    break :posFail;
+            if (firsty < lasty) {
+                for (firsty..lasty) |cy| {
+                    var xprevpp = &atlas_xspan_heads[cy];
+                    var xsp = xprevpp.*;
+                    while (xsp) |xspan| {
+                        const firstx = xspan.xoffs;
+                        if (xspan.xoffs + xspan.xlen >= xlen and firstx < xspan.xoffs + xspan.xlen - xlen) {
+                            const lastx = xspan.xoffs + xspan.xlen - xlen;
+                            for (firstx..lastx) |cx| {
+                                posFail: {
+                                    spanlistbuf[0] = xspan;
+                                    // Find span in this place
+                                    nextY: for (1..ylen) |sy| {
+                                        var subwalk: ?*XSpan = atlas_xspan_heads[cy + sy];
+                                        while (subwalk) |subspan| {
+                                            // TODO! --GM
+                                            //log.debug("subwalk {d} {d} {d} {*}", .{ cx, cy, sy, subspan });
+                                            if (subspan.xoffs <= cx and cx + xlen <= subspan.xoffs + subspan.xlen) {
+                                                spanlistbuf[sy] = subspan;
+                                                continue :nextY;
+                                            }
+                                            subwalk = subspan.*.next;
+                                        }
+                                        break :posFail;
+                                    }
+                                    bestx = cx;
+                                    besty = cy;
+                                    bestl = cl;
+                                    break :foundSpace;
                                 }
                             }
-                            bestx = cx;
-                            besty = cy;
-                            bestl = cl;
-                            break :foundSpace;
                         }
+                        xsp = xspan.next;
                     }
                 }
             }
@@ -359,30 +414,58 @@ pub fn insertCharData(ce: *CharEntry) !void {
 
     // Now actually allocate the character
     log.debug("Allocated {x}, pos {d}, {d}", .{ char_idx, bestx, besty });
+    prev_y_per_size[ylen - 1][xlen - 1] = besty;
     for (0..ylen) |sy| {
         const tx = bestx;
         const ty = besty + sy;
+        try allocXSpan(allocator, spanlistbuf[sy], @intCast(u16, bestx), @intCast(u16, xlen));
         const aoffs = (ty * atlas_pitch) + (tx >> 3);
         const cshift: u5 = @intCast(u5, tx & 0b111);
-        const sm = xmask >> cshift;
         const sv = charbuf[sy] >> cshift;
         inline for (0..3) |i| {
             const ishift: u5 = (24 - (8 * i));
-            const bm: u8 = @truncate(u8, sm >> ishift);
             const bv: u8 = @truncate(u8, sv >> ishift);
-            atlas_usedmask[aoffs + i] |= bm;
             atlas_data[aoffs + i] |= bv;
         }
-        xLeftWipe: for (atlas_first_empty_x[ty]..atlas_width) |cx| {
-            const xaoffs = (ty * atlas_pitch) + (cx >> 3);
-            const xam = atlas_usedmask[xaoffs];
-            if ((xam & (@as(u8, 0x80) >> @intCast(u3, cx & 0b111))) != 0) {
-                atlas_first_empty_x[ty] = cx + 1;
-            } else {
-                break :xLeftWipe;
-            }
-        }
     }
+
+    //log.debug("{any}", .{atlas_first_empty_y});
     ce.srcxoffs = @intCast(u16, bestx);
     ce.srcyoffs = @intCast(u16, besty);
+}
+
+fn allocXSpan(allocator: Allocator, xspan: *XSpan, xoffs: u16, xlen: u16) !void {
+    // Split into our different cases
+    if (xspan.xoffs == xoffs) {
+        // Fully against left
+        if (xspan.xlen != xlen) {
+            // Not fully against right
+            xspan.xoffs += xlen;
+            xspan.xlen -= xlen;
+        } else {
+            // Fully against right
+            if (xspan.next) |next| {
+                next.prevptr = xspan.prevptr;
+            }
+            xspan.prevptr.* = xspan.next;
+            allocator.destroy(xspan);
+        }
+    } else {
+        // Not butted against left
+        if (xoffs + xlen != xspan.xoffs + xspan.xlen) {
+            // Not fully against right
+            var newspan = try allocator.create(XSpan);
+            errdefer allocator.destroy(newspan);
+            newspan.next = xspan.next;
+            newspan.prevptr = &(xspan.next);
+            newspan.xoffs = xoffs + xlen;
+            newspan.xlen = xspan.xoffs + xspan.xlen - newspan.xoffs;
+            xspan.xlen = xoffs - xspan.xoffs;
+            xspan.next = newspan;
+        } else {
+            // Fully against right
+            // WARNING: UNTESTED!
+            xspan.xlen -= xlen;
+        }
+    }
 }
