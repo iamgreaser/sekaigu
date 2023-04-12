@@ -13,7 +13,7 @@ pub fn build(b: *std.Build) void {
     const exe = buildTarget(b, target, optimize);
 
     wasmExe.install();
-    const wasmMod = b.addModule("sekaigu_wasm_bin", .{
+    const wasmMod = b.createModule(.{
         .source_file = wasmExe.getOutputSource(),
     });
     exe.addModule("sekaigu_wasm_bin", wasmMod);
