@@ -61,7 +61,7 @@ pub fn main() !void {
     atlas_width = try std.fmt.parseInt(usize, std.mem.sliceTo(std.os.argv[3], 0), 10);
     atlas_height = try std.fmt.parseInt(usize, std.mem.sliceTo(std.os.argv[4], 0), 10);
     atlas_layers = try std.fmt.parseInt(usize, std.mem.sliceTo(std.os.argv[5], 0), 10);
-    log.err("Building img=\"{s}\", map=\"{s}\" , {d} x {d}, {d} layer(s)", .{ outimgfname, outmapfname, atlas_width, atlas_height, atlas_layers });
+    log.info("Building img=\"{s}\", map=\"{s}\" , {d} x {d}, {d} layer(s)", .{ outimgfname, outmapfname, atlas_width, atlas_height, atlas_layers });
     atlas_pitch = @divExact(atlas_width, 8);
     char_entries = @TypeOf(char_entries).init(allocator);
     defer char_entries.clearAndFree();
@@ -77,7 +77,7 @@ pub fn main() !void {
     atlas_data = try allocator.alloc(u8, atlas_pitch * atlas_height * atlas_layers + 4);
     defer allocator.free(atlas_data);
     std.mem.set(u8, atlas_data, 0);
-    log.err("Allocated size: {d} bytes x2", .{atlas_usedmask.len});
+    log.info("Allocated size: {d} bytes x2", .{atlas_usedmask.len});
     atlas_first_empty_x = try allocator.alloc(usize, atlas_height * atlas_layers);
     defer allocator.free(atlas_first_empty_x);
     std.mem.set(usize, atlas_first_empty_x, 0);
@@ -98,10 +98,10 @@ pub fn main() !void {
         if (ce.xsize_m1 == lastbadxsize_m1 and ce.ysize_m1 == lastbadysize_m1) {
             continue :charInputs;
         }
-        log.err("Parsing {d}/{d} (-{d}): {x}, origin {d}, {d}, size {d} x {d}", .{ charsdone, i, i - charsdone, ce.char_idx, ce.dstxoffs, ce.dstyoffs, ce.xsize_m1 + 1, ce.ysize_m1 + 1 });
+        log.debug("Parsing {d}/{d} (-{d}): {x}, origin {d}, {d}, size {d} x {d}", .{ charsdone, i, i - charsdone, ce.char_idx, ce.dstxoffs, ce.dstyoffs, ce.xsize_m1 + 1, ce.ysize_m1 + 1 });
         insertCharData(ce) catch |err| switch (err) {
             error.CharacterDidNotFit => {
-                log.err("Failed to allocate character in atlas", .{});
+                log.err("Failed to allocate character {x} in atlas", .{ce.char_idx});
                 lastbadxsize_m1 = ce.xsize_m1;
                 lastbadysize_m1 = ce.ysize_m1;
                 continue :charInputs;
@@ -113,7 +113,7 @@ pub fn main() !void {
 
     // Generate atlas texture file
     {
-        log.err("Saving image output \"{s}\"", .{outimgfname});
+        log.info("Saving image output \"{s}\"", .{outimgfname});
         const file = try std.fs.cwd().createFile(outimgfname, .{
             .read = false,
             .truncate = true,
@@ -126,7 +126,7 @@ pub fn main() !void {
 
     // Remove what isn't in there
     {
-        log.err("Removing missing chars", .{});
+        log.info("Removing missing chars", .{});
         var i: usize = 0;
         while (i < char_entries.items.len) {
             const ce = &char_entries.items[i];
@@ -139,12 +139,12 @@ pub fn main() !void {
     }
 
     // Sort it again
-    log.err("Sorting glyphs by ascending char index", .{});
+    log.info("Sorting glyphs by ascending char index", .{});
     std.sort.sort(CharEntry, char_entries.items, {}, CharEntry.codepointLessThan);
 
     // Generate map file
     {
-        log.err("Saving map output \"{s}\"", .{outmapfname});
+        log.info("Saving map output \"{s}\"", .{outmapfname});
         const file = try std.fs.cwd().createFile(outmapfname, .{
             .read = false,
             .truncate = true,
@@ -171,12 +171,12 @@ pub fn main() !void {
         }
     }
 
-    log.err("Done", .{});
+    log.info("Done", .{});
 }
 
 fn appendFilenameToAtlas(fname: []const u8) !void {
     // TODO! --GM
-    log.err("Adding \"{s}\" to atlas", .{fname});
+    log.info("Adding \"{s}\" to atlas", .{fname});
     {
         const file = try std.fs.cwd().openFile(fname, .{ .mode = .read_only });
         defer file.close();
@@ -237,7 +237,7 @@ pub fn parseCharData(comptime RowLen: comptime_int, char_idx: u21, char_str: []c
 
     // If the character is completely blank, mark it as such and skip
     if (xmax < xmin) {
-        log.err("Char {x} is blank, width = {d}", .{ char_idx, RowLen * 4 });
+        log.debug("Char {x} is blank, width = {d}", .{ char_idx, RowLen * 4 });
         switch (RowLen) {
             2 => try empties_8.append(char_idx),
             4 => try empties_16.append(char_idx),
@@ -312,7 +312,7 @@ pub fn insertCharData(ce: *CharEntry) !void {
     }
 
     // Now actually allocate the character
-    log.err("Allocated {x}, pos {d}, {d}", .{ char_idx, bestx, besty });
+    log.debug("Allocated {x}, pos {d}, {d}", .{ char_idx, bestx, besty });
     for (0..ylen) |sy| {
         const tx = bestx;
         const ty = besty + sy;
