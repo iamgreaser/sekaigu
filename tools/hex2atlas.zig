@@ -6,7 +6,8 @@ const INCHARMAXWIDTH = 16;
 const INCHARHEIGHT = 16;
 
 pub const std_options = struct {
-    pub const log_level = .info;
+    pub const log_level = .err;
+    //pub const log_level = .info;
     //pub const log_level = .debug;
 };
 

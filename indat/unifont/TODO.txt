@@ -1,0 +1,4 @@
+I need to sort out the licensing information for this.
+
+This is a merge of two source files from GNU Unifont 15.0.1, which is available under the SIL open font licence or whatever it is.
+Sorry about this pathetic excuse file, I'll get around to it.

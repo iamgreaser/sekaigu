@@ -1,8 +1,37 @@
+const builtin = @import("builtin");
 const std = @import("std");
+const Build = std.Build;
+const CompileStep = Build.CompileStep;
+const FileSource = Build.FileSource;
 
-pub fn build(b: *std.Build) void {
+pub fn build(b: *Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
+    // Generate font atlas
+    var exeHex2Atlas = b.addExecutable(.{
+        .name = "hex2atlas",
+        .root_source_file = FileSource.relative("tools/hex2atlas.zig"),
+        // The target MUST be native, as we're gonna run this.
+        .target = std.zig.CrossTarget.fromTarget(builtin.target),
+        // Debug builds build and run faster than the Release* versions take to build.
+        // The Release* builds do run really fast, but we only need this for one atlas.
+        .optimize = .Debug,
+    });
+    var runHex2Atlas = b.addRunArtifact(exeHex2Atlas);
+    runHex2Atlas.addArg(""); // We don't need a PBM output
+    var fontRaw = runHex2Atlas.addOutputFileArg("unifont.rgba4444");
+    var fontMap = runHex2Atlas.addOutputFileArg("unifont.map");
+    runHex2Atlas.addArg("1024"); // Width
+    runHex2Atlas.addArg("1024"); // Height
+    runHex2Atlas.addArg("12"); // Layers
+    runHex2Atlas.addFileSourceArg(FileSource.relative(
+        "indat/unifont/unifont-jp-with-upper-15.0.01.hex",
+    ));
+    var fontRawMod = b.createModule(.{ .source_file = fontRaw });
+    var fontMapMod = b.createModule(.{ .source_file = fontMap });
+
+    // Generate wasm version
     const wasmExe = buildTarget(
         b,
         std.zig.CrossTarget.parse(.{
@@ -10,13 +39,18 @@ pub fn build(b: *std.Build) void {
         }) catch unreachable,
         optimize,
     );
-    const exe = buildTarget(b, target, optimize);
-
+    wasmExe.addModule("font_raw_bin", fontRawMod);
+    wasmExe.addModule("font_map_bin", fontMapMod);
     wasmExe.install();
     const wasmMod = b.createModule(.{
         .source_file = wasmExe.getOutputSource(),
     });
+
+    // Generate native version
+    const exe = buildTarget(b, target, optimize);
     exe.addModule("sekaigu_wasm_bin", wasmMod);
+    exe.addModule("font_raw_bin", fontRawMod);
+    exe.addModule("font_map_bin", fontMapMod);
     exe.install();
 
     const run_cmd = exe.run();
@@ -48,18 +82,18 @@ pub fn build(b: *std.Build) void {
     }
 }
 
-pub fn buildTarget(b: *std.Build, target: std.zig.CrossTarget, optimize: std.builtin.Mode) *std.Build.CompileStep {
+pub fn buildTarget(b: *Build, target: std.zig.CrossTarget, optimize: std.builtin.Mode) *CompileStep {
     var exe = if (target.toTarget().isWasm())
         b.addSharedLibrary(.{
             .name = "sekaigu",
-            .root_source_file = .{ .path = "src/main.zig" },
+            .root_source_file = FileSource.relative("src/main.zig"),
             .target = target,
             .optimize = optimize,
         })
     else
         b.addExecutable(.{
             .name = "sekaigu",
-            .root_source_file = .{ .path = "src/main.zig" },
+            .root_source_file = FileSource.relative("src/main.zig"),
             .target = target,
             .optimize = optimize,
             .linkage = .dynamic,
