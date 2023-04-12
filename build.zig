@@ -14,8 +14,9 @@ pub fn build(b: *Build) void {
         .root_source_file = FileSource.relative("tools/hex2atlas.zig"),
         // The target MUST be native, as we're gonna run this.
         .target = std.zig.CrossTarget.fromTarget(builtin.target),
-        // Debug builds build and run faster than the Release* versions take to build.
+        // Debug builds build and run faster than the ReleaseSafe and ReleaseFast versions take to build.
         // The Release* builds do run really fast, but we only need this for one atlas.
+        // ReleaseSmall also builds quickly, but doesn't catch undefined behaviour.
         .optimize = .Debug,
     });
     var runHex2Atlas = b.addRunArtifact(exeHex2Atlas);

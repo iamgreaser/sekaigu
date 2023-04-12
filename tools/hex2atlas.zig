@@ -160,6 +160,7 @@ pub fn main() !void {
 
     // Generate raw image
     if (outrawfname.len >= 1) {
+        const BUFSIZE = 1024 * 16;
         log.info("Saving raw RGBA4444 image output \"{s}\"", .{outrawfname});
         const file = try std.fs.cwd().createFile(outrawfname, .{
             .read = false,
@@ -169,7 +170,15 @@ pub fn main() !void {
         var block = try allocator.alloc(u8, atlas_width * 2);
         defer allocator.free(block);
         std.mem.set(u8, block, 0);
-        const writer = file.writer();
+
+        const raw_writer = file.writer();
+        var buffered_writer_state = std.io.BufferedWriter(BUFSIZE, @TypeOf(raw_writer)){
+            .unbuffered_writer = raw_writer,
+        };
+        var buffered_writer = buffered_writer_state.writer();
+        var deflate_compressor = try std.compress.deflate.compressor(allocator, buffered_writer, .{});
+        defer deflate_compressor.deinit();
+        var writer = deflate_compressor.writer();
         // First component starts at the MSbit
         const layer_remap = [_]u16{
             0x8000, 0x0800, 0x0080, 0x0008,
@@ -224,7 +233,10 @@ pub fn main() !void {
         var buffered_writer_state = std.io.BufferedWriter(BUFSIZE, @TypeOf(raw_writer)){
             .unbuffered_writer = raw_writer,
         };
-        var writer = buffered_writer_state.writer();
+        var buffered_writer = buffered_writer_state.writer();
+        var deflate_compressor = try std.compress.deflate.compressor(allocator, buffered_writer, .{});
+        defer deflate_compressor.deinit();
+        var writer = deflate_compressor.writer();
         try writer.writeIntLittle(u32, @intCast(u32, empties_8.items.len));
         try writer.writeIntLittle(u32, @intCast(u32, empties_16.items.len));
         try writer.writeIntLittle(u32, @intCast(u32, char_entries.items.len));
@@ -243,6 +255,7 @@ pub fn main() !void {
             try writer.writeIntLittle(u8, ce.xsize_m1);
             try writer.writeIntLittle(u8, ce.xsize_m1);
         }
+        try deflate_compressor.close();
         try buffered_writer_state.flush();
     }
 
