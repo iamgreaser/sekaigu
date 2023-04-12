@@ -1,11 +1,7 @@
 const std = @import("std");
 const log = std.log.scoped(.main);
 
-const USEPADDING = false;
-
-const PADDING = if (USEPADDING) 1 else 0;
-const INCHARPITCH = 16 + (PADDING * 2); // (RowLen * 4) + padding;
-const INCHARHEIGHT = 16 + (PADDING * 2); // 16 + padding;
+const INCHARHEIGHT = 16;
 
 // We can potentially use up to 16 layers and use RGBA 4:4:4:4 as our internal format.
 
@@ -14,12 +10,15 @@ const INCHARHEIGHT = 16 + (PADDING * 2); // 16 + padding;
 // 01 = * INVALID * - temporarily used when allocating space
 // 10 = Allocated 0
 // 11 = Allocated 1
-var outatlas: []u2 = undefined;
+var atlas_usedmask: []u8 = undefined;
+var atlas_data: []u8 = undefined;
+var atlas_pitch: usize = 0;
 var atlas_width: usize = 0;
 var atlas_height: usize = 0;
 var atlas_layers: usize = 0;
+var atlas_final_y: []usize = undefined;
 
-const CharEntry = packed struct {
+const CharEntry = struct {
     char_idx: u32,
     srcxoffs: u16,
     srcyoffs: u16,
@@ -27,8 +26,25 @@ const CharEntry = packed struct {
     dstyoffs: u8,
     xsize_m1: u8,
     ysize_m1: u8,
+    charbuf: [INCHARHEIGHT]u32,
+
+    const Self = @This();
+
+    pub fn area(self: Self) usize {
+        return @intCast(usize, self.xsize_m1 + 1) * @intCast(usize, self.ysize_m1 + 1);
+    }
+
+    pub fn codepointLessThan(_: void, a: Self, b: Self) bool {
+        return a.char_idx < b.char_idx;
+    }
+
+    pub fn areaGreaterThan(_: void, a: Self, b: Self) bool {
+        return a.area() > b.area();
+    }
 };
 var char_entries: std.ArrayList(CharEntry) = undefined;
+var empties_8: std.ArrayList(u21) = undefined;
+var empties_16: std.ArrayList(u21) = undefined;
 
 pub fn main() !void {
     const AllocatorType = std.heap.GeneralPurposeAllocator(.{
@@ -44,48 +60,52 @@ pub fn main() !void {
     atlas_width = try std.fmt.parseInt(usize, std.mem.sliceTo(std.os.argv[3], 0), 10);
     atlas_height = try std.fmt.parseInt(usize, std.mem.sliceTo(std.os.argv[4], 0), 10);
     atlas_layers = try std.fmt.parseInt(usize, std.mem.sliceTo(std.os.argv[5], 0), 10);
-    log.info("Building img=\"{s}\", map=\"{s}\" , {d} x {d}, {d} layer(s)", .{ outimgfname, outmapfname, atlas_width, atlas_height, atlas_layers });
+    log.err("Building img=\"{s}\", map=\"{s}\" , {d} x {d}, {d} layer(s)", .{ outimgfname, outmapfname, atlas_width, atlas_height, atlas_layers });
+    atlas_pitch = @divExact(atlas_width, 8);
     char_entries = @TypeOf(char_entries).init(allocator);
+    defer char_entries.clearAndFree();
+    empties_8 = @TypeOf(empties_8).init(allocator);
+    defer empties_8.clearAndFree();
+    empties_16 = @TypeOf(empties_16).init(allocator);
+    defer empties_16.clearAndFree();
 
-    // NOTE: []u2 uses a whole byte per element
-    outatlas = try allocator.alloc(u2, atlas_width * atlas_height * atlas_layers);
-    defer allocator.free(outatlas);
-    std.mem.set(u2, outatlas, 0);
-    var packedatlas: []u8 = try allocator.alloc(u8, @divExact(atlas_width, 8) * atlas_height * atlas_layers);
-    defer allocator.free(packedatlas);
-    log.info("Allocated size: {d} bytes", .{outatlas.len});
-    //log.info("byte diff test {d}", .{@ptrToInt(&outfield[21]) - @ptrToInt(&outfield[0])});
+    // Give this some extra space for overflow
+    atlas_usedmask = try allocator.alloc(u8, atlas_pitch * atlas_height * atlas_layers + 4);
+    defer allocator.free(atlas_usedmask);
+    std.mem.set(u8, atlas_usedmask, 0);
+    atlas_data = try allocator.alloc(u8, atlas_pitch * atlas_height * atlas_layers + 4);
+    defer allocator.free(atlas_data);
+    std.mem.set(u8, atlas_data, 0);
+    log.err("Allocated size: {d} bytes x2", .{atlas_usedmask.len});
+    atlas_final_y = try allocator.alloc(usize, atlas_layers);
+    defer allocator.free(atlas_final_y);
+    std.mem.set(usize, atlas_final_y, 0);
 
-    // Create our atlas
-    doneInputs: for (std.os.argv[6..]) |infname| {
-        appendFilenameToAtlas(std.mem.sliceTo(infname, 0)) catch |err| switch (err) {
-            error.CharacterDidNotFit => {
-                log.err("Failed to allocate character in atlas - let's see what's in the atlas at the very least", .{});
-                break :doneInputs;
-            },
-            else => {
-                return err;
-            },
-        };
+    // Load our glyphs
+    for (std.os.argv[6..]) |infname| {
+        try appendFilenameToAtlas(std.mem.sliceTo(infname, 0));
     }
 
-    // Pack atlas image
-    for (0..(atlas_height * atlas_layers)) |y| {
-        for (0..@divExact(atlas_width, 8)) |x| {
-            var v: u8 = 0;
-            const src = outatlas[(y * atlas_width) + (x * 8) ..][0..8];
-            for (0..8) |sx| {
-                if (src[sx] == 0b11) {
-                    v |= @as(u8, 0x80) >> @intCast(u3, sx);
-                }
-            }
-            packedatlas[y * @divExact(atlas_width, 8) + x] = v;
-        }
+    // Sort glyphs by size
+    std.sort.sort(CharEntry, char_entries.items, {}, CharEntry.areaGreaterThan);
+
+    // Generate our atlas
+    var charsdone: usize = 0;
+    charInputs: for (char_entries.items, 0..) |*ce, i| {
+        log.err("Parsing {d}/{d} (-{d}): {x}, origin {d}, {d}, size {d} x {d}", .{ charsdone, i, i - charsdone, ce.char_idx, ce.dstxoffs, ce.dstyoffs, ce.xsize_m1 + 1, ce.ysize_m1 + 1 });
+        insertCharData(ce) catch |err| switch (err) {
+            error.CharacterDidNotFit => {
+                log.err("Failed to allocate character in atlas", .{});
+                continue :charInputs;
+            },
+            //else => { return err; },
+        };
+        charsdone += 1;
     }
 
     // Generate atlas texture file
     {
-        log.info("Saving image output \"{s}\"", .{outimgfname});
+        log.err("Saving image output \"{s}\"", .{outimgfname});
         const file = try std.fs.cwd().createFile(outimgfname, .{
             .read = false,
             .truncate = true,
@@ -93,15 +113,62 @@ pub fn main() !void {
         defer file.close();
         const writer = file.writer();
         try writer.print("P4 {d} {d}\n", .{ atlas_width, atlas_height * atlas_layers });
-        try writer.writeAll(packedatlas);
+        try writer.writeAll(atlas_data);
     }
 
-    log.info("Done", .{});
+    // Remove what isn't in there
+    {
+        log.err("Removing missing chars", .{});
+        var i: usize = 0;
+        while (i < char_entries.items.len) {
+            const ce = &char_entries.items[i];
+            if (ce.srcxoffs >= atlas_width) {
+                _ = char_entries.swapRemove(i);
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    // Sort it again
+    log.err("Sorting glyphs by ascending char index", .{});
+    std.sort.sort(CharEntry, char_entries.items, {}, CharEntry.codepointLessThan);
+
+    // Generate map file
+    {
+        log.err("Saving map output \"{s}\"", .{outmapfname});
+        const file = try std.fs.cwd().createFile(outmapfname, .{
+            .read = false,
+            .truncate = true,
+        });
+        defer file.close();
+        const writer = file.writer();
+        try writer.writeIntLittle(u32, @intCast(u32, empties_8.items.len));
+        try writer.writeIntLittle(u32, @intCast(u32, empties_16.items.len));
+        try writer.writeIntLittle(u32, @intCast(u32, char_entries.items.len));
+        for (empties_8.items) |v| {
+            try writer.writeIntLittle(u32, v);
+        }
+        for (empties_16.items) |v| {
+            try writer.writeIntLittle(u32, v);
+        }
+        for (char_entries.items) |ce| {
+            try writer.writeIntLittle(u32, ce.char_idx);
+            try writer.writeIntLittle(u16, ce.srcxoffs);
+            try writer.writeIntLittle(u16, ce.srcyoffs);
+            try writer.writeIntLittle(u8, ce.dstxoffs);
+            try writer.writeIntLittle(u8, ce.dstyoffs);
+            try writer.writeIntLittle(u8, ce.xsize_m1);
+            try writer.writeIntLittle(u8, ce.xsize_m1);
+        }
+    }
+
+    log.err("Done", .{});
 }
 
 fn appendFilenameToAtlas(fname: []const u8) !void {
     // TODO! --GM
-    log.info("Adding \"{s}\" to atlas", .{fname});
+    log.err("Adding \"{s}\" to atlas", .{fname});
     {
         const file = try std.fs.cwd().openFile(fname, .{ .mode = .read_only });
         defer file.close();
@@ -132,39 +199,26 @@ fn appendFileToAtlas(file: std.fs.File) !void {
 
         // Load character glyph data
         switch (char_str.len) {
-            16 * 2 * 1 => try parseCharData(u8, 2, char_idx, char_str),
-            16 * 2 * 2 => try parseCharData(u16, 4, char_idx, char_str),
+            16 * 2 * 1 => try parseCharData(2, char_idx, char_str),
+            16 * 2 * 2 => try parseCharData(4, char_idx, char_str),
             else => {
                 return error.InvalidFormat;
             },
         }
-        // Find a spot in the atlas for this to go
-        //log.info("Line: {x} {d} {s}", .{ char_idx, @divExact(char_data.len, 2 * 16), char_data });
-        //log.info("Line: {x} {any}", .{ char_idx, char_data });
-        //_ = char_data;
-
-        // TODO: Emit char index + dims --GM
     }
 }
 
-pub fn parseCharData(comptime Uint: type, comptime RowLen: comptime_int, char_idx: u21, char_str: []const u8) !void {
-    // NOTE: We have 1-pixel-wide padding on the leftmost, topmost, rightmost and bottommost pixel rows/columns.
-    const UintShift = switch (Uint) {
-        u8 => u3,
-        u16 => u4,
-        else => unreachable,
-    };
-    var charbuf = [1]u2{0} ** (INCHARHEIGHT * INCHARPITCH);
+pub fn parseCharData(comptime RowLen: comptime_int, char_idx: u21, char_str: []const u8) !void {
+    var incharbuf = [1]u32{0} ** INCHARHEIGHT;
     var ymin: usize = 15;
     var ymax: usize = 0;
     var xmin: usize = RowLen * 4 - 1;
     var xmax: usize = 0;
     for (0..16) |y| {
-        const row = try std.fmt.parseInt(Uint, char_str[RowLen * y ..][0..RowLen], 16);
+        const row: u32 = try std.fmt.parseInt(u32, char_str[RowLen * y ..][0..RowLen], 16);
+        incharbuf[y] = row << (32 - (RowLen * 4));
         for (0..RowLen * 4) |x| {
-            const v = @intCast(u2, (row >> @intCast(UintShift, (RowLen * 4 - 1 - x))) & 0b1);
-            charbuf[((y + PADDING) * INCHARPITCH) + (x + PADDING)] = v | 0b10;
-            if (v != 0) {
+            if (@bitCast(i32, incharbuf[y] << @intCast(u5, x)) < 0) {
                 xmin = @min(xmin, x);
                 xmax = @max(xmax, x);
                 ymin = @min(ymin, y);
@@ -175,56 +229,83 @@ pub fn parseCharData(comptime Uint: type, comptime RowLen: comptime_int, char_id
 
     // If the character is completely blank, mark it as such and skip
     if (xmax < xmin) {
-        // TODO: Actually mark characters as such --GM
-        log.info("Char {x} is blank, width = {d}", .{ char_idx, RowLen * 4 });
+        log.err("Char {x} is blank, width = {d}", .{ char_idx, RowLen * 4 });
+        switch (RowLen) {
+            2 => try empties_8.append(char_idx),
+            4 => try empties_16.append(char_idx),
+            else => unreachable,
+        }
         return;
     }
 
-    log.err("Parsing {d}: {x}, origin {d}, {d}, size {d} x {d}", .{ char_entries.items.len, char_idx, xmin, ymin, xmax + 1 - xmin, ymax + 1 - ymin });
+    const xoffs = xmin;
+    const yoffs = ymin;
+    const xlen = xmax + 1 - xmin;
+    const ylen = ymax + 1 - ymin;
+    for (0..ylen) |y| {
+        incharbuf[y] = incharbuf[y + yoffs] << @intCast(u5, xoffs);
+    }
 
+    try char_entries.append(CharEntry{
+        .char_idx = char_idx,
+        .srcxoffs = @intCast(u16, atlas_width),
+        .srcyoffs = @intCast(u16, atlas_height * atlas_layers),
+        .dstxoffs = @intCast(u8, xoffs),
+        .dstyoffs = @intCast(u8, yoffs),
+        .xsize_m1 = @intCast(u8, xlen - 1),
+        .ysize_m1 = @intCast(u8, ylen - 1),
+        .charbuf = incharbuf,
+    });
+}
+
+pub fn insertCharData(ce: *CharEntry) !void {
+    const charbuf: []const u32 = &ce.charbuf;
+    const char_idx = ce.char_idx;
+    const xlen: usize = ce.xsize_m1 + 1;
+    const ylen: usize = ce.ysize_m1 + 1;
+    const xmask: u32 = 0 -% (@as(u32, 0x80000000) >> @intCast(u5, xlen - 1));
+
+    // Now scan the entire atlas to see if we can overlap with what's there
     var bestoverlap: isize = -1;
     var bestx: usize = 0;
     var besty: usize = 0;
-    const xoffs = xmin;
-    const yoffs = ymin;
-    const poffs = (INCHARPITCH * yoffs) + xoffs;
-    const xlen = xmax + 1 - xmin + (PADDING * 2);
-    const ylen = ymax + 1 - ymin + (PADDING * 2);
-
-    // Now scan the entire atlas to see if we can overlap with what's there
-    skipRestOfAtlas: for (0..atlas_layers) |cl| {
-        const loffs = cl * atlas_height;
-        for (loffs + 0..loffs + atlas_height - ylen) |cy| {
-            skipRestOfRow: for (0..atlas_width - xlen) |cx| {
+    var bestl: usize = 0;
+    restOfAtlas: for (0..atlas_layers) |cl| {
+        const loffs: usize = cl * atlas_height;
+        const lasty = loffs + @min(atlas_final_y[cl] + 1, atlas_height - ylen);
+        for (loffs + 0..lasty) |cy| {
+            restOfRow: for (0..atlas_width - xlen) |cx| {
+                const inshift: u5 = @intCast(u5, cx & 0b111);
+                const cmask = xmask >> inshift;
+                var thisoverlap: isize = 0;
                 posFail: {
-                    var thisoverlap: isize = 0;
+                    const aoffs_base = (cy * atlas_pitch) + (cx >> 3);
                     for (0..ylen) |sy| {
-                        for (0..xlen) |sx| {
-                            // TODO!
-                            const tx = cx + sx;
-                            const ty = cy + sy;
-                            const av = outatlas[(ty * atlas_width) + tx];
-                            const sv = charbuf[poffs + (INCHARPITCH * sy) + sx];
-                            if (av != 0) {
-                                if (sv == av) {
-                                    thisoverlap += 1;
-                                } else {
-                                    break :posFail;
-                                }
-                            }
+                        const aoffs = aoffs_base + (sy * atlas_pitch);
+                        const am: u32 = (@as(u32, atlas_usedmask[aoffs + 0]) << 24) | (@as(u32, atlas_usedmask[aoffs + 1]) << 16) | (@as(u32, atlas_usedmask[aoffs + 2]) << 8);
+                        const av: u32 = (@as(u32, atlas_data[aoffs + 0]) << 24) | (@as(u32, atlas_data[aoffs + 1]) << 16) | (@as(u32, atlas_data[aoffs + 2]) << 8);
+                        const sv = charbuf[sy] >> inshift;
+                        if (((sv ^ av) & am & cmask) != 0) {
+                            break :posFail;
+                        } else {
+                            thisoverlap += @popCount(am & cmask);
                         }
                     }
                     if (thisoverlap > bestoverlap) {
                         bestoverlap = thisoverlap;
                         bestx = cx;
                         besty = cy;
+                        bestl = cl;
+                        if (bestoverlap == xlen * ylen) {
+                            break :restOfAtlas;
+                        }
                     }
                     // FLAWED OPTIMISATION: If this is a fully empty spot, skip the rest of this row.
-                    if (thisoverlap == 0) {
-                        if (cx == 0) {
-                            break :skipRestOfAtlas;
+                    if (true and thisoverlap == 0) {
+                        if (false and cx == 0) {
+                            break :restOfAtlas;
                         }
-                        break :skipRestOfRow;
+                        break :restOfRow;
                     }
                 }
             }
@@ -239,21 +320,21 @@ pub fn parseCharData(comptime Uint: type, comptime RowLen: comptime_int, char_id
     // Now actually allocate the character
     log.err("Allocated {x}, pos {d}, {d}, overlap {d}/{d}", .{ char_idx, bestx, besty, bestoverlap, xlen * ylen });
     for (0..ylen) |sy| {
-        for (0..xlen) |sx| {
-            const tx = bestx + sx;
-            const ty = besty + sy;
-            const sv = charbuf[poffs + (INCHARPITCH * sy) + sx];
-            outatlas[(ty * atlas_width) + tx] = sv;
+        const tx = bestx;
+        const ty = besty + sy;
+        const aoffs = (ty * atlas_pitch) + (tx >> 3);
+        const cshift: u5 = @intCast(u5, tx & 0b111);
+        const sm = xmask >> cshift;
+        const sv = charbuf[sy] >> cshift;
+        inline for (0..3) |i| {
+            const ishift: u5 = (24 - (8 * i));
+            const bm: u8 = @truncate(u8, sm >> ishift);
+            const bv: u8 = @truncate(u8, sv >> ishift);
+            atlas_usedmask[aoffs + i] |= bm;
+            atlas_data[aoffs + i] |= bv;
         }
     }
-
-    try char_entries.append(CharEntry{
-        .char_idx = char_idx,
-        .srcxoffs = @intCast(u16, bestx),
-        .srcyoffs = @intCast(u16, besty),
-        .dstxoffs = @intCast(u8, xoffs),
-        .dstyoffs = @intCast(u8, yoffs),
-        .xsize_m1 = @intCast(u8, xlen - (PADDING * 2) - 1),
-        .ysize_m1 = @intCast(u8, ylen - (PADDING * 2) - 1),
-    });
+    ce.srcxoffs = @intCast(u16, bestx);
+    ce.srcyoffs = @intCast(u16, besty);
+    atlas_final_y[bestl] = @max(atlas_final_y[bestl], besty + ylen - 1 - (atlas_height * bestl));
 }
