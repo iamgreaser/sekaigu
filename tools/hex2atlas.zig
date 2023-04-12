@@ -3,6 +3,10 @@ const log = std.log.scoped(.main);
 
 const INCHARHEIGHT = 16;
 
+pub const std_options = struct {
+    pub const log_level = .info;
+};
+
 // We can potentially use up to 16 layers and use RGBA 4:4:4:4 as our internal format.
 
 // Mapping:
@@ -56,12 +60,13 @@ pub fn main() !void {
     };
     var allocator = allocator_state.allocator();
 
-    const outimgfname = std.mem.sliceTo(std.os.argv[1], 0);
-    const outmapfname = std.mem.sliceTo(std.os.argv[2], 0);
-    atlas_width = try std.fmt.parseInt(usize, std.mem.sliceTo(std.os.argv[3], 0), 10);
-    atlas_height = try std.fmt.parseInt(usize, std.mem.sliceTo(std.os.argv[4], 0), 10);
-    atlas_layers = try std.fmt.parseInt(usize, std.mem.sliceTo(std.os.argv[5], 0), 10);
-    log.info("Building img=\"{s}\", map=\"{s}\" , {d} x {d}, {d} layer(s)", .{ outimgfname, outmapfname, atlas_width, atlas_height, atlas_layers });
+    const outpbmfname = std.mem.sliceTo(std.os.argv[1], 0);
+    const outrawfname = std.mem.sliceTo(std.os.argv[2], 0);
+    const outmapfname = std.mem.sliceTo(std.os.argv[3], 0);
+    atlas_width = try std.fmt.parseInt(usize, std.mem.sliceTo(std.os.argv[4], 0), 10);
+    atlas_height = try std.fmt.parseInt(usize, std.mem.sliceTo(std.os.argv[5], 0), 10);
+    atlas_layers = try std.fmt.parseInt(usize, std.mem.sliceTo(std.os.argv[6], 0), 10);
+    log.info("Building pbm=\"{s}\", raw=\"{s}\" map=\"{s}\" , {d} x {d}, {d} layer(s)", .{ outpbmfname, outrawfname, outmapfname, atlas_width, atlas_height, atlas_layers });
     atlas_pitch = @divExact(atlas_width, 8);
     char_entries = @TypeOf(char_entries).init(allocator);
     defer char_entries.clearAndFree();
@@ -83,7 +88,7 @@ pub fn main() !void {
     std.mem.set(usize, atlas_first_empty_x, 0);
 
     // Load our glyphs
-    for (std.os.argv[6..]) |infname| {
+    for (std.os.argv[7..]) |infname| {
         try appendFilenameToAtlas(std.mem.sliceTo(infname, 0));
     }
 
@@ -111,10 +116,10 @@ pub fn main() !void {
         charsdone += 1;
     }
 
-    // Generate atlas texture file
-    {
-        log.info("Saving image output \"{s}\"", .{outimgfname});
-        const file = try std.fs.cwd().createFile(outimgfname, .{
+    // Generate sample image
+    if (outpbmfname.len >= 1) {
+        log.info("Saving PBM sample image output \"{s}\"", .{outpbmfname});
+        const file = try std.fs.cwd().createFile(outpbmfname, .{
             .read = false,
             .truncate = true,
         });
@@ -122,6 +127,41 @@ pub fn main() !void {
         const writer = file.writer();
         try writer.print("P4 {d} {d}\n", .{ atlas_width, atlas_height * atlas_layers });
         try writer.writeAll(atlas_data);
+    }
+
+    // Generate raw image
+    if (outrawfname.len >= 1) {
+        log.info("Saving raw RGBA4444 image output \"{s}\"", .{outrawfname});
+        const file = try std.fs.cwd().createFile(outrawfname, .{
+            .read = false,
+            .truncate = true,
+        });
+        defer file.close();
+        var block = try allocator.alloc(u8, atlas_width * 2);
+        defer allocator.free(block);
+        std.mem.set(u8, block, 0);
+        const writer = file.writer();
+        // First component starts at the MSbit
+        const layer_remap = [_]u16{
+            0x8000, 0x0800, 0x0080, 0x0008,
+            0x4000, 0x0400, 0x0040, 0x0004,
+            0x2000, 0x0200, 0x0020, 0x0002,
+            0x1000, 0x0100, 0x0010, 0x0001,
+        };
+        for (0..atlas_height) |cy| {
+            for (0..atlas_width) |cx| {
+                var v: u16 = 0;
+                for (0..atlas_layers) |cl| {
+                    const pmask = atlas_data[((cl * atlas_layers) + cy) * atlas_width + (cx >> 3)];
+                    if (((pmask << @truncate(u3, cx)) & 0x80) != 0)
+                        v |= layer_remap[cl];
+                }
+                inline for (0..2) |shifti| {
+                    block[2 * cx + shifti] = @truncate(u8, v >> (shifti * 8));
+                }
+            }
+            try writer.writeAll(block);
+        }
     }
 
     // Remove what isn't in there
@@ -143,14 +183,19 @@ pub fn main() !void {
     std.sort.sort(CharEntry, char_entries.items, {}, CharEntry.codepointLessThan);
 
     // Generate map file
-    {
+    if (outmapfname.len >= 1) {
+        const BUFSIZE = 1024 * 16;
         log.info("Saving map output \"{s}\"", .{outmapfname});
         const file = try std.fs.cwd().createFile(outmapfname, .{
             .read = false,
             .truncate = true,
         });
         defer file.close();
-        const writer = file.writer();
+        const raw_writer = file.writer();
+        var buffered_writer_state = std.io.BufferedWriter(BUFSIZE, @TypeOf(raw_writer)){
+            .unbuffered_writer = raw_writer,
+        };
+        var writer = buffered_writer_state.writer();
         try writer.writeIntLittle(u32, @intCast(u32, empties_8.items.len));
         try writer.writeIntLittle(u32, @intCast(u32, empties_16.items.len));
         try writer.writeIntLittle(u32, @intCast(u32, char_entries.items.len));
@@ -169,6 +214,7 @@ pub fn main() !void {
             try writer.writeIntLittle(u8, ce.xsize_m1);
             try writer.writeIntLittle(u8, ce.xsize_m1);
         }
+        try buffered_writer_state.flush();
     }
 
     log.info("Done", .{});
