@@ -16,7 +16,7 @@ var atlas_pitch: usize = 0;
 var atlas_width: usize = 0;
 var atlas_height: usize = 0;
 var atlas_layers: usize = 0;
-var atlas_final_y: []usize = undefined;
+var atlas_first_empty_x: []usize = undefined;
 
 const CharEntry = struct {
     char_idx: u32,
@@ -38,8 +38,9 @@ const CharEntry = struct {
         return a.char_idx < b.char_idx;
     }
 
-    pub fn areaGreaterThan(_: void, a: Self, b: Self) bool {
-        return a.area() > b.area();
+    pub fn sizeGoesEarlier(_: void, a: Self, b: Self) bool {
+        //return a.area() > b.area();
+        return a.xsize_m1 > b.xsize_m1 or (a.xsize_m1 == b.xsize_m1 and a.ysize_m1 > b.ysize_m1);
     }
 };
 var char_entries: std.ArrayList(CharEntry) = undefined;
@@ -77,9 +78,9 @@ pub fn main() !void {
     defer allocator.free(atlas_data);
     std.mem.set(u8, atlas_data, 0);
     log.err("Allocated size: {d} bytes x2", .{atlas_usedmask.len});
-    atlas_final_y = try allocator.alloc(usize, atlas_layers);
-    defer allocator.free(atlas_final_y);
-    std.mem.set(usize, atlas_final_y, 0);
+    atlas_first_empty_x = try allocator.alloc(usize, atlas_height * atlas_layers);
+    defer allocator.free(atlas_first_empty_x);
+    std.mem.set(usize, atlas_first_empty_x, 0);
 
     // Load our glyphs
     for (std.os.argv[6..]) |infname| {
@@ -87,15 +88,22 @@ pub fn main() !void {
     }
 
     // Sort glyphs by size
-    std.sort.sort(CharEntry, char_entries.items, {}, CharEntry.areaGreaterThan);
+    std.sort.sort(CharEntry, char_entries.items, {}, CharEntry.sizeGoesEarlier);
 
     // Generate our atlas
     var charsdone: usize = 0;
+    var lastbadxsize_m1: u8 = 17 - 1;
+    var lastbadysize_m1: u8 = 17 - 1;
     charInputs: for (char_entries.items, 0..) |*ce, i| {
+        if (ce.xsize_m1 == lastbadxsize_m1 and ce.ysize_m1 == lastbadysize_m1) {
+            continue :charInputs;
+        }
         log.err("Parsing {d}/{d} (-{d}): {x}, origin {d}, {d}, size {d} x {d}", .{ charsdone, i, i - charsdone, ce.char_idx, ce.dstxoffs, ce.dstyoffs, ce.xsize_m1 + 1, ce.ysize_m1 + 1 });
         insertCharData(ce) catch |err| switch (err) {
             error.CharacterDidNotFit => {
                 log.err("Failed to allocate character in atlas", .{});
+                lastbadxsize_m1 = ce.xsize_m1;
+                lastbadysize_m1 = ce.ysize_m1;
                 continue :charInputs;
             },
             //else => { return err; },
@@ -265,60 +273,46 @@ pub fn insertCharData(ce: *CharEntry) !void {
     const ylen: usize = ce.ysize_m1 + 1;
     const xmask: u32 = 0 -% (@as(u32, 0x80000000) >> @intCast(u5, xlen - 1));
 
-    // Now scan the entire atlas to see if we can overlap with what's there
-    var bestoverlap: isize = -1;
+    // Now scan the entire atlas for an empty space
     var bestx: usize = 0;
     var besty: usize = 0;
     var bestl: usize = 0;
-    restOfAtlas: for (0..atlas_layers) |cl| {
-        const loffs: usize = cl * atlas_height;
-        const lasty = loffs + @min(atlas_final_y[cl] + 1, atlas_height - ylen);
-        for (loffs + 0..lasty) |cy| {
-            restOfRow: for (0..atlas_width - xlen) |cx| {
-                const inshift: u5 = @intCast(u5, cx & 0b111);
-                const cmask = xmask >> inshift;
-                var thisoverlap: isize = 0;
-                posFail: {
-                    const aoffs_base = (cy * atlas_pitch) + (cx >> 3);
-                    for (0..ylen) |sy| {
-                        const aoffs = aoffs_base + (sy * atlas_pitch);
-                        const am: u32 = (@as(u32, atlas_usedmask[aoffs + 0]) << 24) | (@as(u32, atlas_usedmask[aoffs + 1]) << 16) | (@as(u32, atlas_usedmask[aoffs + 2]) << 8);
-                        const av: u32 = (@as(u32, atlas_data[aoffs + 0]) << 24) | (@as(u32, atlas_data[aoffs + 1]) << 16) | (@as(u32, atlas_data[aoffs + 2]) << 8);
-                        const sv = charbuf[sy] >> inshift;
-                        if (((sv ^ av) & am & cmask) != 0) {
-                            break :posFail;
-                        } else {
-                            thisoverlap += @popCount(am & cmask);
+    foundSpace: {
+        for (0..atlas_layers) |cl| {
+            const loffs: usize = cl * atlas_height;
+            const lasty = loffs + atlas_height - ylen;
+            for (loffs + 0..lasty) |cy| {
+                const firstx = atlas_first_empty_x[cy];
+                const lastx = atlas_width - xlen;
+                if (firstx < lastx) {
+                    for (firstx..lastx) |cx| {
+                        const inshift: u5 = @intCast(u5, cx & 0b111);
+                        const cmask = xmask >> inshift;
+                        posFail: {
+                            const aoffs_base = (cy * atlas_pitch) + (cx >> 3);
+                            for (0..ylen) |sy| {
+                                const aoffs = aoffs_base + (sy * atlas_pitch);
+                                const am: u32 = (@as(u32, atlas_usedmask[aoffs + 0]) << 24) | (@as(u32, atlas_usedmask[aoffs + 1]) << 16) | (@as(u32, atlas_usedmask[aoffs + 2]) << 8);
+                                if ((am & cmask) != 0) {
+                                    break :posFail;
+                                }
+                            }
+                            bestx = cx;
+                            besty = cy;
+                            bestl = cl;
+                            break :foundSpace;
                         }
-                    }
-                    if (thisoverlap > bestoverlap) {
-                        bestoverlap = thisoverlap;
-                        bestx = cx;
-                        besty = cy;
-                        bestl = cl;
-                        if (bestoverlap == xlen * ylen) {
-                            break :restOfAtlas;
-                        }
-                    }
-                    // FLAWED OPTIMISATION: If this is a fully empty spot, skip the rest of this row.
-                    if (true and thisoverlap == 0) {
-                        if (false and cx == 0) {
-                            break :restOfAtlas;
-                        }
-                        break :restOfRow;
                     }
                 }
             }
         }
-    }
 
-    // If we failed to allocate, throw an error
-    if (bestoverlap < 0) {
+        // If we failed to allocate, throw an error
         return error.CharacterDidNotFit;
     }
 
     // Now actually allocate the character
-    log.err("Allocated {x}, pos {d}, {d}, overlap {d}/{d}", .{ char_idx, bestx, besty, bestoverlap, xlen * ylen });
+    log.err("Allocated {x}, pos {d}, {d}", .{ char_idx, bestx, besty });
     for (0..ylen) |sy| {
         const tx = bestx;
         const ty = besty + sy;
@@ -333,8 +327,16 @@ pub fn insertCharData(ce: *CharEntry) !void {
             atlas_usedmask[aoffs + i] |= bm;
             atlas_data[aoffs + i] |= bv;
         }
+        xLeftWipe: for (atlas_first_empty_x[ty]..atlas_width) |cx| {
+            const xaoffs = (ty * atlas_pitch) + (cx >> 3);
+            const xam = atlas_usedmask[xaoffs];
+            if ((xam & (@as(u8, 0x80) >> @intCast(u3, cx & 0b111))) != 0) {
+                atlas_first_empty_x[ty] = cx + 1;
+            } else {
+                break :xLeftWipe;
+            }
+        }
     }
     ce.srcxoffs = @intCast(u16, bestx);
     ce.srcyoffs = @intCast(u16, besty);
-    atlas_final_y[bestl] = @max(atlas_final_y[bestl], besty + ylen - 1 - (atlas_height * bestl));
 }
