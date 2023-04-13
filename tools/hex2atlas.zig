@@ -190,7 +190,7 @@ pub fn main() !void {
             for (0..atlas_width) |cx| {
                 var v: u16 = 0;
                 for (0..atlas_layers) |cl| {
-                    const pmask = atlas_data[((cl * atlas_layers) + cy) * atlas_width + (cx >> 3)];
+                    const pmask = atlas_data[((cl * atlas_height) + cy) * atlas_pitch + (cx >> 3)];
                     if (((pmask << @truncate(u3, cx)) & 0x80) != 0)
                         v |= layer_remap[cl];
                 }
@@ -200,6 +200,8 @@ pub fn main() !void {
             }
             try writer.writeAll(block);
         }
+        try deflate_compressor.close();
+        try buffered_writer_state.flush();
     }
 
     // Remove what isn't in there

@@ -115,7 +115,7 @@ var importObject = {
     glIsEnabled: (cap) => { return gl.isEnabled(cap); },
     glLinkProgram: (program) => { return gl.linkProgram(M[program]); },
     glShaderSource: (shader, source) => { return gl.shaderSource(M[shader], wrap_string(source)); },
-    glTexImage2D: (target, level, internalformat, width, height, border, format, type_, pixels, size) => { return gl.texImage2D(target, level, internalformat, width, height, border, format, type_, wrap_data(Uint8Array, pixels, size)); },
+    glTexImage2D: (target, level, internalformat, width, height, border, format, type_, pixels, size) => { return gl.texImage2D(target, level, internalformat, width, height, border, format, type_, wrap_data((type_ == gl.UNSIGNED_SHORT_4_4_4_4 ? Uint16Array : Uint8Array), pixels, size)); },
     glTexParameteri: (target, pname, param) => { return gl.texParameteri(target, pname, param); },
     glUseProgram: (program) => { return gl.useProgram(M[program]); },
     glUniform1i: (location_, value0) => { return gl.uniform1i(M[location_], value0); }, // wrapped on the JS side

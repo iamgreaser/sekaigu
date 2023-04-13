@@ -10,12 +10,7 @@ pub const main_allocator = if (builtin.target.isWasm())
 else
     std.heap.c_allocator;
 
-// FIXME: The dispatch seems borked --GM
-//const GfxContext = @import("GfxContext.zig");
-const GfxContext = if (builtin.target.isWasm())
-    @import("GfxContext/web.zig")
-else
-    @import("GfxContext/sdl.zig");
+const GfxContext = @import("GfxContext.zig").GfxContext;
 
 const WebServer = if (builtin.target.isWasm())
     struct {
@@ -48,6 +43,10 @@ const Mat3f = linalg.Mat3f;
 const Mat4f = linalg.Mat4f;
 const world = @import("world.zig");
 const ConvexHull = world.ConvexHull;
+
+// TODO: Extract this from the wasm blob for builds with a wasm blob embedded into them --GM
+const font_raw_bin = @embedFile("font_raw_bin");
+const font_map_bin = @embedFile("font_map_bin");
 
 const MAX_FPS = 60;
 const NSEC_PER_FRAME = @divFloor(time.ns_per_s, MAX_FPS);
@@ -189,6 +188,19 @@ pub fn Model(comptime VAType: type, comptime IndexT: type) type {
     };
 }
 
+var model_fonttest = Model(VA_P3F_BP2F_T2F, u16){
+    .va = &[_]VA_P3F_BP2F_T2F{
+        .{ .pos = .{ 0.0, 16.0, 0.0 }, .bpos = .{ 0.0, 0.0 }, .tex0 = .{ 0.0, 0.0 } },
+        .{ .pos = .{ 0.0, 0.0, 0.0 }, .bpos = .{ 0.0, 0.0 }, .tex0 = .{ 0.0, 4.0 } },
+        .{ .pos = .{ 16.0, 0.0, 0.0 }, .bpos = .{ 0.0, 0.0 }, .tex0 = .{ 4.0, 4.0 } },
+        .{ .pos = .{ 16.0, 16.0, 0.0 }, .bpos = .{ 0.0, 0.0 }, .tex0 = .{ 4.0, 0.0 } },
+    },
+    .idx_list = &[_]u16{
+        0, 1, 2,
+        0, 2, 3,
+    },
+};
+
 var model_floor = Model(VA_P4HF_T2F_C3F_N3F, u16){
     .va = &[_]VA_P4HF_T2F_C3F_N3F{
         .{ .pos = .{ 0.0, 0.0, 0.0, 1.0 }, .tex0 = .{ 0, 0 }, .color = .{ 1.0, 1.0, 1.0 }, .normal = .{ 0, 1, 0 } },
@@ -255,6 +267,7 @@ var shader_uniforms: struct {
     light: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 }),
     cam_pos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 }),
     smp0: gl.Sampler2D = gl.Sampler2D.makeSampler(0),
+    font_color: Vec4f = Vec4f.new(.{ 1.0, 1.0, 1.0, 1.0 }),
 } = .{};
 const shader_src = shadermagic.makeShaderSource(.{
     .uniform_type = @TypeOf(shader_uniforms),
@@ -357,6 +370,46 @@ const textured_src = shadermagic.makeShaderSource(.{
 var textured_prog: gl.Program = gl.Program.Dummy;
 var textured_prog_unicache: shadermagic.UniformIdxCache(@TypeOf(shader_uniforms)) = .{};
 
+const VA_P3F_BP2F_T2F = struct {
+    pos: [3]f32, // origin in 3D space
+    bpos: [2]f32, // billboard position offset in metres (3D space) or pixels (2D space)
+    tex0: [2]f32, // note: floor(x) selects channel, floor(y) selects bit to use
+};
+const bb_font_src = shadermagic.makeShaderSource(.{
+    .uniform_type = @TypeOf(shader_uniforms),
+    .attrib_type = VA_P3F_BP2F_T2F,
+    .varyings = &[_]shadermagic.MakeShaderSourceOptions.FieldEntry{
+        .{ "vec2", "vtex0" },
+    },
+    .vert = (
+        \\void main () {
+        \\    vtex0 = itex0.st;
+        \\    vec4 rwpos = mmodel * ipos;
+        \\    vec4 rspos = mcam * rwpos;
+        \\    vec4 rpos = mproj * (rspos + vec4(ibpos.xy, 0.0, 0.0));
+        \\    gl_Position = rpos;
+        \\}
+    ),
+    .frag = (
+        \\void main () {
+        \\    vec2 chn0 = floor(vtex0);
+        \\    vec2 tex0 = vtex0 - chn0;
+        \\    vec4 t0sample = texture2D(smp0, tex0);// - 0.5/1024.0);
+        \\    float t0maskf = (chn0.x < 2.0
+        \\        ? (chn0.x < 1.0 ? t0sample.r : t0sample.g)
+        \\        : (chn0.x < 0.0 ? t0sample.b : t0sample.a));
+        \\    t0maskf = (t0maskf * 15.0 + 0.5) / 16.0;
+        \\    bool t0val = mod(t0maskf*pow(2.0, chn0.y), 1.0) >= 0.5;
+        \\    //bool t0val = fract(t0maskf) >= 0.5;
+        \\    //if (!t0val) discard;
+        \\    gl_FragColor = (t0val ? font_color : vec4(0.0, 0.0, 0.0, 1.0));
+        \\}
+    ),
+});
+var bb_font_prog: gl.Program = gl.Program.Dummy;
+var bb_font_prog_unicache: shadermagic.UniformIdxCache(@TypeOf(shader_uniforms)) = .{};
+var font_tex: gl.Texture2D = gl.Texture2D.Dummy;
+
 var test_tex: gl.Texture2D = gl.Texture2D.Dummy;
 var gfx: GfxContext = undefined;
 var webserver: WebServer = undefined;
@@ -379,6 +432,7 @@ pub fn init() !void {
     // Compile the shaders
     shader_prog = try shader_src.compileProgram();
     textured_prog = try textured_src.compileProgram();
+    bb_font_prog = try bb_font_src.compileProgram();
 
     // Generate a test texture
     test_tex = try gl.Texture2D.genTexture();
@@ -419,6 +473,40 @@ pub fn init() !void {
         try gl.Texture2D.generateMipmap();
     }
 
+    // Load the font texture
+    font_tex = try gl.Texture2D.genTexture();
+    {
+        const SIZE = 1024;
+        var buf = try main_allocator.alloc(u16, SIZE * SIZE);
+        defer main_allocator.free(buf);
+        {
+            var buf_stream = std.io.fixedBufferStream(font_raw_bin);
+            var buf_reader = buf_stream.reader();
+            var decompressor = try std.compress.deflate.decompressor(main_allocator, buf_reader, null);
+            defer decompressor.deinit();
+            var decompressor_reader = decompressor.reader();
+            for (buf) |*v| {
+                v.* = try decompressor_reader.readIntLittle(u16);
+            }
+        }
+
+        defer gl.activeTexture(0) catch {};
+        try gl.activeTexture(0);
+        defer {
+            // FIXME: if activeTexture somehow fails, this may unbind the wrong slot --GM
+            gl.activeTexture(0) catch {};
+            gl.Texture2D.unbindTexture() catch {};
+        }
+        try gl.Texture2D.bindTexture(font_tex);
+        // TODO: Add bindings for texture parameters --GM
+        C.glTexParameteri(C.GL_TEXTURE_2D, C.GL_TEXTURE_WRAP_S, C.GL_REPEAT);
+        C.glTexParameteri(C.GL_TEXTURE_2D, C.GL_TEXTURE_WRAP_T, C.GL_REPEAT);
+        C.glTexParameteri(C.GL_TEXTURE_2D, C.GL_TEXTURE_MAG_FILTER, C.GL_NEAREST);
+        C.glTexParameteri(C.GL_TEXTURE_2D, C.GL_TEXTURE_MIN_FILTER, C.GL_NEAREST);
+        try gl._TestError();
+        try gl.Texture2D.texImage2D(0, SIZE, SIZE, .RGBA4444, buf);
+    }
+
     // Bake our hulls into meshes
     model_pyramid = try Model(VA_P4HF_T2F_C3F_N3F, u16).fromConvexHullPlanes(main_allocator, &[_][4]f32{
         //.{ 0.0, -1.0, 0.0, 0.0 },
@@ -439,9 +527,7 @@ pub fn init() !void {
     try model_base.load();
     try model_floor.load();
     try (model_pyramid orelse unreachable).load();
-
-    // Bind our test texture
-    try shader_uniforms.smp0.bindTexture(test_tex);
+    try model_fonttest.load();
 
     // Start our timer
     timer = if (TIMERS_EXIST) try time.Timer.start() else DUMMY_TIMER;
@@ -566,7 +652,7 @@ pub fn drawScene() !void {
             }
             try gl.Texture2D.bindTexture(test_tex);
 
-            //try gl.useProgram(shader_prog);
+            try shader_uniforms.smp0.bindTexture(test_tex);
             try gl.useProgram(textured_prog);
             defer gl.unuseProgram() catch {};
             shader_uniforms.mmodel = Mat4f.I
@@ -585,12 +671,32 @@ pub fn drawScene() !void {
             }
             try gl.Texture2D.bindTexture(test_tex);
 
+            try shader_uniforms.smp0.bindTexture(test_tex);
             try gl.useProgram(textured_prog);
             defer gl.unuseProgram() catch {};
             shader_uniforms.mmodel = Mat4f.I
                 .translate(0.0, -2.0, 0.0);
             try shadermagic.loadUniforms(&textured_prog, @TypeOf(shader_uniforms), &shader_uniforms, &textured_prog_unicache);
             try model_floor.draw(.Triangles);
+        }
+
+        {
+            defer gl.activeTexture(0) catch {};
+            try gl.activeTexture(0);
+            defer {
+                // FIXME: if activeTexture somehow fails, this may unbind the wrong slot --GM
+                gl.activeTexture(0) catch {};
+                gl.Texture2D.unbindTexture() catch {};
+            }
+            try gl.Texture2D.bindTexture(font_tex);
+
+            try shader_uniforms.smp0.bindTexture(font_tex);
+            try gl.useProgram(bb_font_prog);
+            defer gl.unuseProgram() catch {};
+            shader_uniforms.mmodel = Mat4f.I
+                .translate(0.0, 0.0, -2.0);
+            try shadermagic.loadUniforms(&bb_font_prog, @TypeOf(shader_uniforms), &shader_uniforms, &bb_font_prog_unicache);
+            try model_fonttest.draw(.Triangles);
         }
     }
 }

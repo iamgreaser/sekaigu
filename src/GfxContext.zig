@@ -1,5 +1,4 @@
-const builtin = @import("builtin");
-pub usingnamespace if (builtin.target.isWasm())
+pub const GfxContext = if (@import("builtin").target.isWasm())
     @import("GfxContext/web.zig")
 else
     @import("GfxContext/sdl.zig");
