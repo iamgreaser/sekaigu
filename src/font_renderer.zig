@@ -87,15 +87,19 @@ pub fn init(allocator: Allocator) !void {
         var buf = try allocator.alloc(u16, SIZE * SIZE);
         defer allocator.free(buf);
         {
+            var bytebuf = try allocator.alloc(u8, 2 * SIZE * SIZE);
+            defer allocator.free(bytebuf);
             var buf_stream = std.io.fixedBufferStream(font_raw_bin);
             var buf_reader = buf_stream.reader();
             var decompressor = try std.compress.deflate.decompressor(allocator, buf_reader, null);
             defer decompressor.deinit();
             var decompressor_reader = decompressor.reader();
-            for (buf) |*v| {
-                v.* = try decompressor_reader.readIntLittle(u16);
+            try decompressor_reader.readNoEof(bytebuf);
+            for (buf, 0..) |*v, i| {
+                v.* = (@intCast(u16, bytebuf[2 * i + 0])) | (@intCast(u16, bytebuf[2 * i + 1]) << 8);
             }
         }
+        log.info("Texture decompressed, now upload", .{});
 
         defer gl.activeTexture(0) catch {};
         try gl.activeTexture(0);
