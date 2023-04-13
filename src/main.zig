@@ -265,6 +265,7 @@ pub fn init() !void {
 
     // Initialise the font renderer
     try font_renderer.init(main_allocator);
+    errdefer font_renderer.free();
 
     // Create a web server
     webserver = try WebServer.new(main_allocator);

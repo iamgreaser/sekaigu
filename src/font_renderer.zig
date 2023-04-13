@@ -12,6 +12,17 @@ const Model = gfxstate.Model;
 const font_raw_bin = @embedFile("font_raw_bin");
 const font_map_bin = @embedFile("font_map_bin");
 
+const FontGlyphInfo = struct {
+    srcxoffs: u16,
+    srcyoffs: u16,
+    dstxoffs: u8,
+    dstyoffs: u8,
+    xsize: u8,
+    ysize: u8,
+    xstep: u8,
+};
+var font_map: std.AutoHashMap(u24, FontGlyphInfo) = undefined;
+
 pub var model_fonttest = Model(VA_P3F_BP2F_T2F, u16){
     .va = &[_]VA_P3F_BP2F_T2F{
         .{ .pos = .{ 0.0, 16.0, 0.0 }, .bpos = .{ 0.0, 0.0 }, .tex0 = .{ 0.0, 0.0 } },
@@ -65,7 +76,10 @@ pub var bb_font_prog: gl.Program = gl.Program.Dummy;
 pub var bb_font_prog_unicache: shadermagic.UniformIdxCache(@TypeOf(gfxstate.shader_uniforms)) = .{};
 pub var font_tex: gl.Texture2D = gl.Texture2D.Dummy;
 
+var provided_allocator: Allocator = undefined;
+
 pub fn init(allocator: Allocator) !void {
+    provided_allocator = allocator;
     log.info("Loading font texture", .{});
     font_tex = try gl.Texture2D.genTexture();
     {
@@ -100,8 +114,103 @@ pub fn init(allocator: Allocator) !void {
         try gl.Texture2D.texImage2D(0, SIZE, SIZE, .RGBA4444, buf);
     }
 
+    log.info("Unpacking font map", .{});
+    {
+        var buf_stream = std.io.fixedBufferStream(font_map_bin);
+        var buf_reader = buf_stream.reader();
+        var decompressor = try std.compress.deflate.decompressor(allocator, buf_reader, null);
+        defer decompressor.deinit();
+        var reader = decompressor.reader();
+        const n_empties_8 = try reader.readIntLittle(u24);
+        const n_empties_16 = try reader.readIntLittle(u24);
+        const n_full_glyphs = try reader.readIntLittle(u24);
+        font_map = @TypeOf(font_map).init(allocator);
+        errdefer font_map.deinit();
+        {
+            var prev_char_idx: u24 = 0;
+            for (0..n_empties_8) |_| {
+                const char_idx: u24 = try readCharDelta24(@TypeOf(reader), &reader, &prev_char_idx);
+                try font_map.putNoClobber(char_idx, FontGlyphInfo{
+                    .srcxoffs = 0,
+                    .srcyoffs = 0,
+                    .dstxoffs = 0,
+                    .dstyoffs = 0,
+                    .xsize = 0,
+                    .ysize = 0,
+                    .xstep = 8,
+                });
+            }
+        }
+        {
+            var prev_char_idx: u24 = 0;
+            for (0..n_empties_16) |_| {
+                const char_idx: u24 = try readCharDelta24(@TypeOf(reader), &reader, &prev_char_idx);
+                try font_map.putNoClobber(char_idx, FontGlyphInfo{
+                    .srcxoffs = 0,
+                    .srcyoffs = 0,
+                    .dstxoffs = 0,
+                    .dstyoffs = 0,
+                    .xsize = 0,
+                    .ysize = 0,
+                    .xstep = 8,
+                });
+            }
+        }
+        {
+            var prev_char_idx: u24 = 0;
+            var prevsrcx: u16 = 0;
+            var prevsrcy: u16 = 0;
+            for (0..n_full_glyphs) |_| {
+                const char_idx_and_width: u24 = try readCharDelta24(@TypeOf(reader), &reader, &prev_char_idx);
+                const char_idx: u24 = char_idx_and_width >> 1;
+                const xstep: u8 = switch (@truncate(u1, char_idx)) {
+                    0 => @as(u8, 8),
+                    1 => @as(u8, 16),
+                };
+                prevsrcx +%= try reader.readIntLittle(u16);
+                const srcxoffs = prevsrcx;
+                prevsrcy +%= try reader.readIntLittle(u16);
+                const srcyoffs = prevsrcy;
+                const pdstoffs = try reader.readIntLittle(u8);
+                const dstxoffs = pdstoffs & 0xF;
+                const dstyoffs = pdstoffs >> 4;
+                const psize = try reader.readIntLittle(u8);
+                const xsize = (psize & 0xF) + 1;
+                const ysize = (psize >> 4) + 1;
+                try font_map.putNoClobber(char_idx, FontGlyphInfo{
+                    .srcxoffs = srcxoffs,
+                    .srcyoffs = srcyoffs,
+                    .dstxoffs = dstxoffs,
+                    .dstyoffs = dstyoffs,
+                    .xsize = xsize,
+                    .ysize = ysize,
+                    .xstep = xstep,
+                });
+            }
+        }
+    }
+
     log.info("Compiling font shaders", .{});
     bb_font_prog = try bb_font_src.compileProgram();
 
     log.info("Font renderer initialised", .{});
+}
+
+// Reads a 24-bit encoded delta value
+// NOTE: Expects some kind of reader.
+fn readCharDelta24(comptime Reader: type, reader: *Reader, prev_ptr: *u24) !u24 {
+    const dbyte = try reader.readIntLittle(u8);
+    const delta: u24 = if (dbyte == 0x00)
+        try reader.readIntLittle(u24) + 0xFF
+    else
+        @intCast(u24, dbyte) - 1;
+
+    prev_ptr.* += delta;
+    return prev_ptr.*;
+}
+
+pub fn free() void {
+    font_map.deinit();
+    // TODO: Delete textures --GM
+    // TODO: Delete shaders --GM
 }

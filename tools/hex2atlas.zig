@@ -45,6 +45,7 @@ const CharEntry = struct {
     dstyoffs: u8,
     xsize_m1: u8,
     ysize_m1: u8,
+    xstep: u8,
     charbuf: [INCHARHEIGHT]u32,
 
     const Self = @This();
@@ -222,7 +223,7 @@ pub fn main() !void {
     log.info("Sorting glyphs by ascending char index", .{});
     std.sort.sort(CharEntry, char_entries.items, {}, CharEntry.codepointLessThan);
 
-    // Generate map file
+    // Generate partially-delta-compressed map file
     if (outmapfname.len >= 1) {
         const BUFSIZE = 1024 * 16;
         log.info("Saving map output \"{s}\"", .{outmapfname});
@@ -239,23 +240,61 @@ pub fn main() !void {
         var deflate_compressor = try std.compress.deflate.compressor(allocator, buffered_writer, .{});
         defer deflate_compressor.deinit();
         var writer = deflate_compressor.writer();
-        try writer.writeIntLittle(u32, @intCast(u32, empties_8.items.len));
-        try writer.writeIntLittle(u32, @intCast(u32, empties_16.items.len));
-        try writer.writeIntLittle(u32, @intCast(u32, char_entries.items.len));
-        for (empties_8.items) |v| {
-            try writer.writeIntLittle(u32, v);
+        try writer.writeIntLittle(u24, @intCast(u24, empties_8.items.len));
+        try writer.writeIntLittle(u24, @intCast(u24, empties_16.items.len));
+        try writer.writeIntLittle(u24, @intCast(u24, char_entries.items.len));
+        {
+            var prev_idx: u24 = 0;
+            for (empties_8.items) |v| {
+                const delta: u24 = @intCast(u24, v) - prev_idx;
+                if (delta < 0xFF) {
+                    try writer.writeIntLittle(u8, @intCast(u8, delta + 1));
+                } else {
+                    try writer.writeIntLittle(u8, @intCast(u8, 0x00));
+                    try writer.writeIntLittle(u24, @intCast(u24, delta - 0xFF));
+                }
+                prev_idx += delta;
+            }
         }
-        for (empties_16.items) |v| {
-            try writer.writeIntLittle(u32, v);
+        {
+            var prev_idx: u24 = 0;
+            for (empties_16.items) |v| {
+                const delta: u24 = @intCast(u24, v) - prev_idx;
+                if (delta < 0xFF) {
+                    try writer.writeIntLittle(u8, @intCast(u8, delta + 1));
+                } else {
+                    try writer.writeIntLittle(u8, @intCast(u8, 0x00));
+                    try writer.writeIntLittle(u24, @intCast(u24, delta - 0xFF));
+                }
+                prev_idx += delta;
+            }
         }
-        for (char_entries.items) |ce| {
-            try writer.writeIntLittle(u32, ce.char_idx);
-            try writer.writeIntLittle(u16, ce.srcxoffs);
-            try writer.writeIntLittle(u16, ce.srcyoffs);
-            try writer.writeIntLittle(u8, ce.dstxoffs);
-            try writer.writeIntLittle(u8, ce.dstyoffs);
-            try writer.writeIntLittle(u8, ce.xsize_m1);
-            try writer.writeIntLittle(u8, ce.xsize_m1);
+        {
+            var prev_idx: u24 = 0;
+            var prevsrcx: u16 = 0;
+            var prevsrcy: u16 = 0;
+            // COMPRESSION IDEA: Encoding the char index deltas saves about 6KB after deflating. --GM
+            for (char_entries.items) |ce| {
+                const w16: u8 = switch (ce.xstep) {
+                    8 => 0,
+                    16 => 1,
+                    else => unreachable,
+                };
+                const delta: u24 = @intCast(u24, (ce.char_idx << 1) | w16) - prev_idx;
+                if (delta < 0xFF) {
+                    try writer.writeIntLittle(u8, @intCast(u8, delta + 1));
+                } else {
+                    try writer.writeIntLittle(u8, @intCast(u8, 0x00));
+                    try writer.writeIntLittle(u24, @intCast(u24, delta - 0xFF));
+                }
+                prev_idx += delta;
+                try writer.writeIntLittle(u16, ce.srcxoffs -% prevsrcx);
+                prevsrcx = ce.srcxoffs;
+                try writer.writeIntLittle(u16, ce.srcyoffs -% prevsrcy);
+                prevsrcy = ce.srcyoffs;
+                try writer.writeIntLittle(u8, @intCast(u8, @intCast(u4, ce.dstxoffs)) | @shlExact(ce.dstyoffs, 4));
+                try writer.writeIntLittle(u8, @intCast(u8, @intCast(u4, ce.xsize_m1)) | @shlExact(ce.ysize_m1, 4));
+            }
         }
         try deflate_compressor.close();
         try buffered_writer_state.flush();
@@ -365,6 +404,7 @@ pub fn parseCharData(comptime RowLen: comptime_int, char_idx: u21, char_str: []c
         .dstyoffs = @intCast(u8, yoffs),
         .xsize_m1 = @intCast(u8, xlen - 1),
         .ysize_m1 = @intCast(u8, ylen - 1),
+        .xstep = RowLen * 4,
         .charbuf = incharbuf,
     });
 }
