@@ -44,9 +44,9 @@ const Mat4f = linalg.Mat4f;
 const world = @import("world.zig");
 const ConvexHull = world.ConvexHull;
 
-// TODO: Extract this from the wasm blob for builds with a wasm blob embedded into them --GM
-const font_raw_bin = @embedFile("font_raw_bin");
-const font_map_bin = @embedFile("font_map_bin");
+const font_renderer = @import("font_renderer.zig");
+const gfxstate = @import("gfxstate.zig");
+const Model = gfxstate.Model;
 
 const MAX_FPS = 60;
 const NSEC_PER_FRAME = @divFloor(time.ns_per_s, MAX_FPS);
@@ -80,126 +80,13 @@ pub const std_options = if (builtin.target.isWasm()) struct {
         var tmpbuf: [10 * 1024]u8 = undefined;
         C.console_log(std.fmt.bufPrintZ(&tmpbuf, format, args) catch "ERROR: LOG LINE TOO LONG");
     }
+
+    pub const log_level = .debug;
 } else struct {
-    //
+    pub const log_level = .debug;
 };
 
 pub const VA_P4HF_T2F_C3F_N3F = world.VA_P4HF_T2F_C3F_N3F;
-
-pub fn Model(comptime VAType: type, comptime IndexT: type) type {
-    return struct {
-        pub const Self = @This();
-
-        va: []const VAType,
-        idx_list: []const IndexT,
-        allocator: ?Allocator = null,
-        va_owned: ?[]VAType = null,
-        idx_list_owned: ?[]IndexT = null,
-        va_vbo: gl.BO = gl.BO.Dummy,
-        idx_vbo: gl.BO = gl.BO.Dummy,
-
-        pub fn fromConvexHullPlanes(allocator: Allocator, normals: []const [4]f32) !Self {
-            var chull: *ConvexHull = try allocator.create(ConvexHull);
-            defer allocator.destroy(chull);
-            try chull.init(allocator);
-            defer chull.deinit();
-            for (normals) |normal| {
-                const x = normal[0];
-                const y = normal[1];
-                const z = normal[2];
-                const offs = normal[3];
-                const length = @sqrt(x * x + y * y + z * z);
-                _ = try chull.addFace(Vec3f.new(.{ x / length, y / length, z / length }).normalize(), offs * length);
-            }
-            try chull.buildEdgesAndPoints();
-            log.info("Baked convex hull: {} points, {} indices", .{
-                chull.meshpoints.items.len,
-                chull.meshindices.items.len,
-            });
-            return Self.fromConvexHull(allocator, chull);
-        }
-
-        pub fn fromConvexHull(allocator: Allocator, chull: *ConvexHull) !Self {
-            var va = try allocator.alloc(VAType, chull.meshpoints.items.len);
-            errdefer allocator.free(va);
-            std.mem.copy(VAType, va, chull.meshpoints.items);
-            var idx_list = try allocator.alloc(IndexT, chull.meshindices.items.len);
-            errdefer allocator.free(idx_list);
-            std.mem.copy(IndexT, idx_list, chull.meshindices.items);
-            var result = Self{
-                .allocator = allocator,
-                .va = va,
-                .va_owned = va,
-                .idx_list = idx_list,
-                .idx_list_owned = idx_list,
-            };
-            return result;
-        }
-
-        pub fn deinit(self: *Self) !void {
-            if (self.allocator != null) |allocator| {
-                if (self.va_owned != null) |p| {
-                    allocator.free(p);
-                    self.va_owned = null;
-                }
-                if (self.idx_list_owned != null) |p| {
-                    allocator.free(p);
-                    self.idx_list_owned = null;
-                }
-            }
-        }
-
-        pub fn load(self: *Self) !void {
-            {
-                self.va_vbo = try gl.BO.genBuffer();
-                try gl.bindBuffer(.ArrayBuffer, self.va_vbo);
-                defer gl.unbindBuffer(.ArrayBuffer) catch {};
-                try gl.bufferData(.ArrayBuffer, VAType, self.va, .StaticDraw);
-            }
-            {
-                self.idx_vbo = try gl.BO.genBuffer();
-                try gl.bindBuffer(.ElementArrayBuffer, self.idx_vbo);
-                defer gl.unbindBuffer(.ElementArrayBuffer) catch {};
-                try gl.bufferData(.ElementArrayBuffer, IndexT, self.idx_list, .StaticDraw);
-            }
-        }
-
-        pub fn draw(
-            self: Self,
-            mode: gl.DrawMode,
-        ) !void {
-            try gl.bindBuffer(.ArrayBuffer, self.va_vbo);
-            defer gl.unbindBuffer(.ArrayBuffer) catch {};
-            try gl.bindBuffer(.ElementArrayBuffer, self.idx_vbo);
-            defer gl.unbindBuffer(.ElementArrayBuffer) catch {};
-
-            defer {
-                inline for (@typeInfo(VAType).Struct.fields, 0..) |_, i| {
-                    gl.disableVertexAttribArray(i) catch {};
-                }
-            }
-            inline for (@typeInfo(VAType).Struct.fields, 0..) |field, i| {
-                try gl.vertexAttribPointer(i, VAType, field.name);
-                try gl.enableVertexAttribArray(i);
-            }
-            try gl.drawElements(mode, 0, self.idx_list.len, IndexT);
-            //try gl.drawArrays(mode, 0, self.va.len);
-        }
-    };
-}
-
-var model_fonttest = Model(VA_P3F_BP2F_T2F, u16){
-    .va = &[_]VA_P3F_BP2F_T2F{
-        .{ .pos = .{ 0.0, 16.0, 0.0 }, .bpos = .{ 0.0, 0.0 }, .tex0 = .{ 0.0, 0.0 } },
-        .{ .pos = .{ 0.0, 0.0, 0.0 }, .bpos = .{ 0.0, 0.0 }, .tex0 = .{ 0.0, 4.0 } },
-        .{ .pos = .{ 16.0, 0.0, 0.0 }, .bpos = .{ 0.0, 0.0 }, .tex0 = .{ 4.0, 4.0 } },
-        .{ .pos = .{ 16.0, 16.0, 0.0 }, .bpos = .{ 0.0, 0.0 }, .tex0 = .{ 4.0, 0.0 } },
-    },
-    .idx_list = &[_]u16{
-        0, 1, 2,
-        0, 2, 3,
-    },
-};
 
 var model_floor = Model(VA_P4HF_T2F_C3F_N3F, u16){
     .va = &[_]VA_P4HF_T2F_C3F_N3F{
@@ -260,17 +147,8 @@ var model_base = Model(VA_P4HF_T2F_C3F_N3F, u16){
     },
 };
 
-var shader_uniforms: struct {
-    mproj: Mat4f = Mat4f.perspective(800.0, 600.0, 0.01, 1000.0),
-    mcam: Mat4f = Mat4f.I,
-    mmodel: Mat4f = Mat4f.I,
-    light: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 }),
-    cam_pos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 }),
-    smp0: gl.Sampler2D = gl.Sampler2D.makeSampler(0),
-    font_color: Vec4f = Vec4f.new(.{ 1.0, 1.0, 1.0, 1.0 }),
-} = .{};
 const shader_src = shadermagic.makeShaderSource(.{
-    .uniform_type = @TypeOf(shader_uniforms),
+    .uniform_type = @TypeOf(gfxstate.shader_uniforms),
     .attrib_type = VA_P4HF_T2F_C3F_N3F,
     .varyings = &[_]shadermagic.MakeShaderSourceOptions.FieldEntry{
         .{ "vec4", "vcolor" },
@@ -313,10 +191,10 @@ const shader_src = shadermagic.makeShaderSource(.{
     ),
 });
 var shader_prog: gl.Program = gl.Program.Dummy;
-var shader_prog_unicache: shadermagic.UniformIdxCache(@TypeOf(shader_uniforms)) = .{};
+var shader_prog_unicache: shadermagic.UniformIdxCache(@TypeOf(gfxstate.shader_uniforms)) = .{};
 
 const textured_src = shadermagic.makeShaderSource(.{
-    .uniform_type = @TypeOf(shader_uniforms),
+    .uniform_type = @TypeOf(gfxstate.shader_uniforms),
     .attrib_type = VA_P4HF_T2F_C3F_N3F,
     .varyings = &[_]shadermagic.MakeShaderSourceOptions.FieldEntry{
         .{ "vec4", "vwpos" },
@@ -368,47 +246,7 @@ const textured_src = shadermagic.makeShaderSource(.{
     ),
 });
 var textured_prog: gl.Program = gl.Program.Dummy;
-var textured_prog_unicache: shadermagic.UniformIdxCache(@TypeOf(shader_uniforms)) = .{};
-
-const VA_P3F_BP2F_T2F = struct {
-    pos: [3]f32, // origin in 3D space
-    bpos: [2]f32, // billboard position offset in metres (3D space) or pixels (2D space)
-    tex0: [2]f32, // note: floor(x) selects channel, floor(y) selects bit to use
-};
-const bb_font_src = shadermagic.makeShaderSource(.{
-    .uniform_type = @TypeOf(shader_uniforms),
-    .attrib_type = VA_P3F_BP2F_T2F,
-    .varyings = &[_]shadermagic.MakeShaderSourceOptions.FieldEntry{
-        .{ "vec2", "vtex0" },
-    },
-    .vert = (
-        \\void main () {
-        \\    vtex0 = itex0.st;
-        \\    vec4 rwpos = mmodel * ipos;
-        \\    vec4 rspos = mcam * rwpos;
-        \\    vec4 rpos = mproj * (rspos + vec4(ibpos.xy, 0.0, 0.0));
-        \\    gl_Position = rpos;
-        \\}
-    ),
-    .frag = (
-        \\void main () {
-        \\    vec2 chn0 = floor(vtex0);
-        \\    vec2 tex0 = vtex0 - chn0;
-        \\    vec4 t0sample = texture2D(smp0, tex0);// - 0.5/1024.0);
-        \\    float t0maskf = (chn0.x < 2.0
-        \\        ? (chn0.x < 1.0 ? t0sample.r : t0sample.g)
-        \\        : (chn0.x < 0.0 ? t0sample.b : t0sample.a));
-        \\    t0maskf = (t0maskf * 15.0 + 0.5) / 16.0;
-        \\    bool t0val = mod(t0maskf*pow(2.0, chn0.y), 1.0) >= 0.5;
-        \\    //bool t0val = fract(t0maskf) >= 0.5;
-        \\    if (!t0val) discard;
-        \\    gl_FragColor = (t0val ? font_color : vec4(0.0, 0.0, 0.0, 1.0));
-        \\}
-    ),
-});
-var bb_font_prog: gl.Program = gl.Program.Dummy;
-var bb_font_prog_unicache: shadermagic.UniformIdxCache(@TypeOf(shader_uniforms)) = .{};
-var font_tex: gl.Texture2D = gl.Texture2D.Dummy;
+var textured_prog_unicache: shadermagic.UniformIdxCache(@TypeOf(gfxstate.shader_uniforms)) = .{};
 
 var test_tex: gl.Texture2D = gl.Texture2D.Dummy;
 var gfx: GfxContext = undefined;
@@ -425,6 +263,9 @@ pub fn init() !void {
     try gfx.init();
     errdefer gfx.free();
 
+    // Initialise the font renderer
+    try font_renderer.init(main_allocator);
+
     // Create a web server
     webserver = try WebServer.new(main_allocator);
     errdefer webserver.free();
@@ -432,7 +273,6 @@ pub fn init() !void {
     // Compile the shaders
     shader_prog = try shader_src.compileProgram();
     textured_prog = try textured_src.compileProgram();
-    bb_font_prog = try bb_font_src.compileProgram();
 
     // Generate a test texture
     test_tex = try gl.Texture2D.genTexture();
@@ -473,40 +313,6 @@ pub fn init() !void {
         try gl.Texture2D.generateMipmap();
     }
 
-    // Load the font texture
-    font_tex = try gl.Texture2D.genTexture();
-    {
-        const SIZE = 1024;
-        var buf = try main_allocator.alloc(u16, SIZE * SIZE);
-        defer main_allocator.free(buf);
-        {
-            var buf_stream = std.io.fixedBufferStream(font_raw_bin);
-            var buf_reader = buf_stream.reader();
-            var decompressor = try std.compress.deflate.decompressor(main_allocator, buf_reader, null);
-            defer decompressor.deinit();
-            var decompressor_reader = decompressor.reader();
-            for (buf) |*v| {
-                v.* = try decompressor_reader.readIntLittle(u16);
-            }
-        }
-
-        defer gl.activeTexture(0) catch {};
-        try gl.activeTexture(0);
-        defer {
-            // FIXME: if activeTexture somehow fails, this may unbind the wrong slot --GM
-            gl.activeTexture(0) catch {};
-            gl.Texture2D.unbindTexture() catch {};
-        }
-        try gl.Texture2D.bindTexture(font_tex);
-        // TODO: Add bindings for texture parameters --GM
-        C.glTexParameteri(C.GL_TEXTURE_2D, C.GL_TEXTURE_WRAP_S, C.GL_REPEAT);
-        C.glTexParameteri(C.GL_TEXTURE_2D, C.GL_TEXTURE_WRAP_T, C.GL_REPEAT);
-        C.glTexParameteri(C.GL_TEXTURE_2D, C.GL_TEXTURE_MAG_FILTER, C.GL_NEAREST);
-        C.glTexParameteri(C.GL_TEXTURE_2D, C.GL_TEXTURE_MIN_FILTER, C.GL_NEAREST);
-        try gl._TestError();
-        try gl.Texture2D.texImage2D(0, SIZE, SIZE, .RGBA4444, buf);
-    }
-
     // Bake our hulls into meshes
     model_pyramid = try Model(VA_P4HF_T2F_C3F_N3F, u16).fromConvexHullPlanes(main_allocator, &[_][4]f32{
         //.{ 0.0, -1.0, 0.0, 0.0 },
@@ -527,7 +333,7 @@ pub fn init() !void {
     try model_base.load();
     try model_floor.load();
     try (model_pyramid orelse unreachable).load();
-    try model_fonttest.load();
+    try font_renderer.model_fonttest.load();
 
     // Start our timer
     timer = if (TIMERS_EXIST) try time.Timer.start() else DUMMY_TIMER;
@@ -558,7 +364,7 @@ pub fn main() !void {
 
 var model_zrot: f32 = 0.0;
 var cam_rot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 });
-var cam_pos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 });
+var cam_pos: Vec4f = Vec4f.new(.{ 8.0, 8.0, -1.0, 1.0 });
 var cam_drot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 0.0 });
 var cam_dpos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 0.0 });
 var keys: struct {
@@ -609,7 +415,7 @@ pub fn tickScene(dt: f32) !void {
 }
 
 pub fn drawScene() !void {
-    shader_uniforms.mproj = Mat4f.perspective(
+    gfxstate.shader_uniforms.mproj = Mat4f.perspective(
         @intToFloat(f32, gfx.width),
         @intToFloat(f32, gfx.height),
         0.01,
@@ -617,12 +423,12 @@ pub fn drawScene() !void {
     );
     try gl.clearColor(0.2, 0.0, 0.4, 0.0);
     try gl.clear(.{ .color = true, .depth = true });
-    shader_uniforms.cam_pos = cam_pos;
-    shader_uniforms.mcam = Mat4f.I
+    gfxstate.shader_uniforms.cam_pos = cam_pos;
+    gfxstate.shader_uniforms.mcam = Mat4f.I
         .rotate(cam_rot.a[0], 1.0, 0.0, 0.0)
         .rotate(cam_rot.a[1], 0.0, 1.0, 0.0)
         .translate(-cam_pos.a[0], -cam_pos.a[1], -cam_pos.a[2]);
-    shader_uniforms.light = cam_pos;
+    gfxstate.shader_uniforms.light = cam_pos;
     {
         const had_DepthTest = try gl.isEnabled(.DepthTest);
         const had_CullFace = try gl.isEnabled(.CullFace);
@@ -634,11 +440,11 @@ pub fn drawScene() !void {
         {
             try gl.useProgram(shader_prog);
             defer gl.unuseProgram() catch {};
-            shader_uniforms.mmodel = Mat4f.I
+            gfxstate.shader_uniforms.mmodel = Mat4f.I
                 .translate(0.5, 0.0, -3.0)
                 .rotate(model_zrot, 0.0, 1.0, 0.0)
                 .rotate(model_zrot * 2.0, 0.0, 0.0, 1.0);
-            try shadermagic.loadUniforms(&shader_prog, @TypeOf(shader_uniforms), &shader_uniforms, &shader_prog_unicache);
+            try shadermagic.loadUniforms(&shader_prog, @TypeOf(gfxstate.shader_uniforms), &gfxstate.shader_uniforms, &shader_prog_unicache);
             try model_base.draw(.Triangles);
         }
 
@@ -652,12 +458,12 @@ pub fn drawScene() !void {
             }
             try gl.Texture2D.bindTexture(test_tex);
 
-            try shader_uniforms.smp0.bindTexture(test_tex);
+            try gfxstate.shader_uniforms.smp0.bindTexture(test_tex);
             try gl.useProgram(textured_prog);
             defer gl.unuseProgram() catch {};
-            shader_uniforms.mmodel = Mat4f.I
+            gfxstate.shader_uniforms.mmodel = Mat4f.I
                 .translate(-5.0, -2.0, -10.0); //.rotate(-model_zrot, 0.0, 1.0, 0.0);
-            try shadermagic.loadUniforms(&textured_prog, @TypeOf(shader_uniforms), &shader_uniforms, &textured_prog_unicache);
+            try shadermagic.loadUniforms(&textured_prog, @TypeOf(gfxstate.shader_uniforms), &gfxstate.shader_uniforms, &textured_prog_unicache);
             try (model_pyramid orelse unreachable).draw(.Triangles);
         }
 
@@ -671,12 +477,12 @@ pub fn drawScene() !void {
             }
             try gl.Texture2D.bindTexture(test_tex);
 
-            try shader_uniforms.smp0.bindTexture(test_tex);
+            try gfxstate.shader_uniforms.smp0.bindTexture(test_tex);
             try gl.useProgram(textured_prog);
             defer gl.unuseProgram() catch {};
-            shader_uniforms.mmodel = Mat4f.I
+            gfxstate.shader_uniforms.mmodel = Mat4f.I
                 .translate(0.0, -2.0, 0.0);
-            try shadermagic.loadUniforms(&textured_prog, @TypeOf(shader_uniforms), &shader_uniforms, &textured_prog_unicache);
+            try shadermagic.loadUniforms(&textured_prog, @TypeOf(gfxstate.shader_uniforms), &gfxstate.shader_uniforms, &textured_prog_unicache);
             try model_floor.draw(.Triangles);
         }
 
@@ -688,15 +494,15 @@ pub fn drawScene() !void {
                 gl.activeTexture(0) catch {};
                 gl.Texture2D.unbindTexture() catch {};
             }
-            try gl.Texture2D.bindTexture(font_tex);
+            try gl.Texture2D.bindTexture(font_renderer.font_tex);
 
-            try shader_uniforms.smp0.bindTexture(font_tex);
-            try gl.useProgram(bb_font_prog);
+            try gfxstate.shader_uniforms.smp0.bindTexture(font_renderer.font_tex);
+            try gl.useProgram(font_renderer.bb_font_prog);
             defer gl.unuseProgram() catch {};
-            shader_uniforms.mmodel = Mat4f.I
+            gfxstate.shader_uniforms.mmodel = Mat4f.I
                 .translate(0.0, 0.0, -2.0);
-            try shadermagic.loadUniforms(&bb_font_prog, @TypeOf(shader_uniforms), &shader_uniforms, &bb_font_prog_unicache);
-            try model_fonttest.draw(.Triangles);
+            try shadermagic.loadUniforms(&font_renderer.bb_font_prog, @TypeOf(gfxstate.shader_uniforms), &gfxstate.shader_uniforms, &font_renderer.bb_font_prog_unicache);
+            try font_renderer.model_fonttest.draw(.Triangles);
         }
     }
 }
