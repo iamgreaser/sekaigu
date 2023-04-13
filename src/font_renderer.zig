@@ -63,7 +63,7 @@ const bb_font_src = shadermagic.makeShaderSource(.{
         \\    vec4 t0sample = texture2D(smp0, tex0);// - 0.5/1024.0);
         \\    float t0maskf = (chn0.x < 2.0
         \\        ? (chn0.x < 1.0 ? t0sample.r : t0sample.g)
-        \\        : (chn0.x < 0.0 ? t0sample.b : t0sample.a));
+        \\        : (chn0.x < 3.0 ? t0sample.b : t0sample.a));
         \\    t0maskf = (t0maskf * 15.0 + 0.5) / 16.0;
         \\    bool t0val = mod(t0maskf*pow(2.0, chn0.y), 1.0) >= 0.5;
         \\    //bool t0val = fract(t0maskf) >= 0.5;
