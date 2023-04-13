@@ -92,6 +92,9 @@ pub fn update(self: *Self) !void {
             error.BrokenPipe => {
                 log.info("Got broken pipe from HTTP client", .{});
             },
+            error.EndOfStream => {
+                log.info("Got end of stream from HTTP client", .{});
+            },
             else => {
                 return err;
             },
