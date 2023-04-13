@@ -23,7 +23,7 @@ const FontGlyphInfo = struct {
 };
 var font_map: std.AutoHashMap(u24, FontGlyphInfo) = undefined;
 
-pub var model_fonttest = Model(VA_P3F_BP2F_T2F, u16){
+pub const model_fonttest_showatlas = Model(VA_P3F_BP2F_T2F, u16){
     .va = &[_]VA_P3F_BP2F_T2F{
         .{ .pos = .{ 0.0, 16.0, 0.0 }, .bpos = .{ 0.0, 0.0 }, .tex0 = .{ 0.0, 0.0 } },
         .{ .pos = .{ 0.0, 0.0, 0.0 }, .bpos = .{ 0.0, 0.0 }, .tex0 = .{ 0.0, 4.0 } },
@@ -35,6 +35,7 @@ pub var model_fonttest = Model(VA_P3F_BP2F_T2F, u16){
         0, 2, 3,
     },
 };
+pub var model_fonttest: ?Model(VA_P3F_BP2F_T2F, u16) = null;
 
 const VA_P3F_BP2F_T2F = struct {
     pos: [3]f32, // origin in 3D space
@@ -167,7 +168,7 @@ pub fn init(allocator: Allocator) !void {
             for (0..n_full_glyphs) |_| {
                 const char_idx_and_width: u24 = try readCharDelta24(@TypeOf(reader), &reader, &prev_char_idx);
                 const char_idx: u24 = char_idx_and_width >> 1;
-                const xstep: u8 = switch (@truncate(u1, char_idx)) {
+                const xstep: u8 = switch (@truncate(u1, char_idx_and_width)) {
                     0 => @as(u8, 8),
                     1 => @as(u8, 16),
                 };
@@ -197,7 +198,96 @@ pub fn init(allocator: Allocator) !void {
     log.info("Compiling font shaders", .{});
     bb_font_prog = try bb_font_src.compileProgram();
 
+    log.info("Generating test string", .{});
+    // Use 5cm characters
+    model_fonttest = try bakeString(
+        allocator,
+        0.5,
+        0.5,
+        0.05,
+        "世界具 へ ようこそ! and some English text too... ist das güt? 💩 and Unicode does not need 直し",
+    );
+    errdefer (model_fonttest orelse unreachable).deinit();
+
     log.info("Font renderer initialised", .{});
+}
+
+// TODO: Set a pivot point --GM
+pub fn bakeString(
+    allocator: Allocator,
+    xpivot: f32,
+    ypivot: f32,
+    unit_size: f32,
+    str: []const u8,
+) !Model(VA_P3F_BP2F_T2F, u16) {
+    const view = try std.unicode.Utf8View.init(str);
+
+    // Compute width
+    var xlen: usize = 0;
+    var ylen: usize = 16;
+    var charcount: usize = 0;
+    {
+        var iter = view.iterator();
+        while (iter.nextCodepoint()) |codepoint| {
+            const fme = font_map.get(codepoint) orelse font_map.get(0xFFFD) orelse @panic("Font missing Unicode substitution character!");
+            //const fme = font_map.get(codepoint) orelse @panic("Font missing character!");
+            xlen += fme.xstep;
+            charcount += 1;
+        }
+    }
+
+    var va = try allocator.alloc(VA_P3F_BP2F_T2F, charcount * 4);
+    errdefer allocator.free(va);
+    var idx_list = try allocator.alloc(u16, charcount * 3 * 2);
+    errdefer allocator.free(idx_list);
+    var vapos: usize = 0;
+    var idxpos: usize = 0;
+    var xoffs: f32 = (@intToFloat(f32, xlen) / 16.0 * -xpivot) * unit_size;
+    var yoffs: f32 = (@intToFloat(f32, ylen) / 16.0 * ypivot) * unit_size;
+    {
+        var iter = view.iterator();
+        while (iter.nextCodepoint()) |codepoint| {
+            const fme = font_map.get(codepoint) orelse font_map.get(0xFFFD) orelse @panic("Font missing Unicode substitution character!");
+            log.warn("glyph {x} {d}", .{ codepoint, fme.xstep });
+            const x0: f32 = xoffs + @intToFloat(f32, fme.dstxoffs) / 16.0 * unit_size;
+            const y0: f32 = yoffs - @intToFloat(f32, fme.dstyoffs) / 16.0 * unit_size;
+            const x1: f32 = x0 + @intToFloat(f32, fme.xsize) / 16.0 * unit_size;
+            const y1: f32 = y0 - @intToFloat(f32, fme.ysize) / 16.0 * unit_size;
+            const tx0: f32 = (1.0 / 1024.0) * @intToFloat(f32, fme.srcxoffs);
+            const ty0: f32 = (1.0 / 1024.0) * @intToFloat(f32, fme.srcyoffs);
+            const tx1: f32 = tx0 + (1.0 / 1024.0) * @intToFloat(f32, fme.xsize);
+            const ty1: f32 = ty0 + (1.0 / 1024.0) * @intToFloat(f32, fme.ysize);
+            //const tx0: f32 = 0.0;
+            //const ty0: f32 = 0.0;
+            //const tx1: f32 = 0.0;
+            //const ty1: f32 = 0.0;
+            va[vapos + 0] = VA_P3F_BP2F_T2F{ .pos = .{ 0.0, 0.0, 0.0 }, .bpos = .{ x0, y0 }, .tex0 = .{ tx0, ty0 } };
+            va[vapos + 1] = VA_P3F_BP2F_T2F{ .pos = .{ 0.0, 0.0, 0.0 }, .bpos = .{ x0, y1 }, .tex0 = .{ tx0, ty1 } };
+            va[vapos + 2] = VA_P3F_BP2F_T2F{ .pos = .{ 0.0, 0.0, 0.0 }, .bpos = .{ x1, y1 }, .tex0 = .{ tx1, ty1 } };
+            va[vapos + 3] = VA_P3F_BP2F_T2F{ .pos = .{ 0.0, 0.0, 0.0 }, .bpos = .{ x1, y0 }, .tex0 = .{ tx1, ty0 } };
+            idx_list[idxpos + 0] = @intCast(u16, vapos + 0);
+            idx_list[idxpos + 1] = @intCast(u16, vapos + 1);
+            idx_list[idxpos + 2] = @intCast(u16, vapos + 2);
+            idx_list[idxpos + 3] = @intCast(u16, vapos + 0);
+            idx_list[idxpos + 4] = @intCast(u16, vapos + 2);
+            idx_list[idxpos + 5] = @intCast(u16, vapos + 3);
+            vapos += 4;
+            idxpos += 6;
+            // Advance
+            xoffs += @intToFloat(f32, fme.xstep) / 16.0 * unit_size;
+        }
+    }
+    var result = Model(VA_P3F_BP2F_T2F, u16){
+        .va = va,
+        .idx_list = idx_list,
+        .allocator = allocator,
+        .va_owned = va,
+        .idx_list_owned = idx_list,
+    };
+    errdefer result.deinit();
+    try result.load();
+
+    return result;
 }
 
 // Reads a 24-bit encoded delta value

@@ -334,7 +334,7 @@ pub fn init() !void {
     try model_base.load();
     try model_floor.load();
     try (model_pyramid orelse unreachable).load();
-    try font_renderer.model_fonttest.load();
+    try (font_renderer.model_fonttest orelse unreachable).load();
 
     // Start our timer
     timer = if (TIMERS_EXIST) try time.Timer.start() else DUMMY_TIMER;
@@ -365,7 +365,7 @@ pub fn main() !void {
 
 var model_zrot: f32 = 0.0;
 var cam_rot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 });
-var cam_pos: Vec4f = Vec4f.new(.{ 8.0, 8.0, -1.0, 1.0 });
+var cam_pos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 });
 var cam_drot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 0.0 });
 var cam_dpos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 0.0 });
 var keys: struct {
@@ -500,10 +500,11 @@ pub fn drawScene() !void {
             try gfxstate.shader_uniforms.smp0.bindTexture(font_renderer.font_tex);
             try gl.useProgram(font_renderer.bb_font_prog);
             defer gl.unuseProgram() catch {};
+            gfxstate.shader_uniforms.font_color = Vec4f.new(.{ 0.5, 0.7, 1.0, 1.0 });
             gfxstate.shader_uniforms.mmodel = Mat4f.I
-                .translate(0.0, 0.0, -2.0);
+                .translate(0.0, 2.0, -2.0);
             try shadermagic.loadUniforms(&font_renderer.bb_font_prog, @TypeOf(gfxstate.shader_uniforms), &gfxstate.shader_uniforms, &font_renderer.bb_font_prog_unicache);
-            try font_renderer.model_fonttest.draw(.Triangles);
+            try (font_renderer.model_fonttest orelse unreachable).draw(.Triangles);
         }
     }
 }

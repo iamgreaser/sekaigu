@@ -62,13 +62,13 @@ pub fn Model(comptime VAType: type, comptime IndexT: type) type {
             return result;
         }
 
-        pub fn deinit(self: *Self) !void {
-            if (self.allocator != null) |allocator| {
-                if (self.va_owned != null) |p| {
+        pub fn deinit(self: *Self) void {
+            if (self.allocator) |allocator| {
+                if (self.va_owned) |p| {
                     allocator.free(p);
                     self.va_owned = null;
                 }
-                if (self.idx_list_owned != null) |p| {
+                if (self.idx_list_owned) |p| {
                     allocator.free(p);
                     self.idx_list_owned = null;
                 }

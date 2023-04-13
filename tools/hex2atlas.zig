@@ -288,10 +288,17 @@ pub fn main() !void {
                     try writer.writeIntLittle(u24, @intCast(u24, delta - 0xFF));
                 }
                 prev_idx += delta;
-                try writer.writeIntLittle(u16, ce.srcxoffs -% prevsrcx);
-                prevsrcx = ce.srcxoffs;
-                try writer.writeIntLittle(u16, ce.srcyoffs -% prevsrcy);
-                prevsrcy = ce.srcyoffs;
+                const aw = @intCast(u16, atlas_width);
+                const ah = @intCast(u16, atlas_height);
+                const subx = ce.srcxoffs;
+                const suby = (ce.srcyoffs % ah);
+                const layer = (ce.srcyoffs / ah);
+                const srcxoffs = subx + (aw * (layer % 4));
+                const srcyoffs = suby + (ah * (layer / 4));
+                try writer.writeIntLittle(u16, srcxoffs -% prevsrcx);
+                prevsrcx = srcxoffs;
+                try writer.writeIntLittle(u16, srcyoffs -% prevsrcy);
+                prevsrcy = srcyoffs;
                 try writer.writeIntLittle(u8, @intCast(u8, @intCast(u4, ce.dstxoffs)) | @shlExact(ce.dstyoffs, 4));
                 try writer.writeIntLittle(u8, @intCast(u8, @intCast(u4, ce.xsize_m1)) | @shlExact(ce.ysize_m1, 4));
             }
