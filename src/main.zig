@@ -401,7 +401,7 @@ const bb_font_src = shadermagic.makeShaderSource(.{
         \\    t0maskf = (t0maskf * 15.0 + 0.5) / 16.0;
         \\    bool t0val = mod(t0maskf*pow(2.0, chn0.y), 1.0) >= 0.5;
         \\    //bool t0val = fract(t0maskf) >= 0.5;
-        \\    //if (!t0val) discard;
+        \\    if (!t0val) discard;
         \\    gl_FragColor = (t0val ? font_color : vec4(0.0, 0.0, 0.0, 1.0));
         \\}
     ),
