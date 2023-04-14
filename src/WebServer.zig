@@ -249,6 +249,7 @@ const ClientState = struct {
                         const path = line[pos0 + 1 .. pos1];
                         const httpver = line[pos1 + 1 ..];
                         log.debug("Handling method: \"{s}\" path: \"{s}\" ver: \"{s}\"", .{ method, path, httpver });
+                        // TODO: Parse HTTP version for conformance to HTTP/1.1 --GM
                         self.request.?.method = method: {
                             inline for (@typeInfo(http.Method).Enum.fields) |field| {
                                 if (std.mem.eql(u8, method, field.name)) {
@@ -504,7 +505,13 @@ pub const WebServer = struct {
             .status = info.status,
             .headers = .{
                 .@"Content-Type" = info.mime,
-                .Connection = request.headers.Connection.?,
+                .Connection = switch (request.headers.Connection.?) {
+                    //.close => .close,
+                    .@"Keep-Alive", .@"keep-alive" => |v| v,
+                    // Apparently things which aren't "close" need to be kept alive for HTTP/1.1.
+                    // But for older versions, it does need to be "close".
+                    else => .close,
+                },
             },
             .body_buf = info.blob,
         };
