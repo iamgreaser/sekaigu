@@ -6,6 +6,7 @@ const http = std.http;
 
 // TODO: Allow a custom port --GM
 pub const PORT = 10536;
+pub const POLL_TIMEOUT_MSEC = 200; // How often do we ensure that we wake this thread?
 pub const MAX_CLIENTS = 128;
 pub const CLIENT_BUF_SIZE = 192;
 pub const PATH_BUF_SIZE = 64;
@@ -102,6 +103,14 @@ const ClientState = struct {
         self.accum_buf_used = 0;
         self.request = HttpRequest{};
         self.response = null;
+    }
+
+    pub fn expectedPollEvents(self: *Self) @TypeOf(@intToPtr(*allowzero os.pollfd, 0).events) {
+        return switch (self.state) {
+            .ReadCommand, .ReadHeaders => os.POLL.IN,
+            .WriteCommand, .WriteHeaders, .WriteBody, .WriteFlushClose => os.POLL.OUT,
+            else => 0,
+        };
     }
 
     pub fn update(self: *Self) !void {
@@ -356,6 +365,10 @@ pub const WebServer = struct {
     clients: [MAX_CLIENTS]ClientState = [1]ClientState{ClientState{}} ** MAX_CLIENTS,
     first_free_client: ?*ClientState = null,
     first_used_client: ?*ClientState = null,
+    thread: ?std.Thread = null,
+    thread_shutdown: std.Thread.ResetEvent = .{},
+    poll_list: [1 + MAX_CLIENTS]os.pollfd = undefined,
+    poll_clients: [1 + MAX_CLIENTS]?*ClientState = undefined,
 
     //server: http.Server,
     //response: ?*http.Server.Response = null,
@@ -389,6 +402,9 @@ pub const WebServer = struct {
 
     pub fn init(self: *Self) !void {
         log.info("Initialising web server", .{});
+        if (self.thread != null) {
+            @panic("Attempted to reinit a WebServer while its thread is running!");
+        }
         var server_sockfd = try os.socket(os.AF.INET6, os.SOCK.STREAM | os.SOCK.NONBLOCK, os.IPPROTO.TCP);
         errdefer os.closeSocket(server_sockfd);
         const sock_addr = os.sockaddr.in6{
@@ -425,15 +441,32 @@ pub const WebServer = struct {
             client.prev = if (i == 0) null else &self.clients[i - 1];
             client.next = if (i == MAX_CLIENTS - 1) null else &self.clients[i + 1];
         }
+        // Create thread
+        self.thread_shutdown.reset();
+        self.thread = try std.Thread.spawn(
+            .{
+                .stack_size = 1024 * 64, // Give it 64KB
+            },
+            Self.updateWorker,
+            .{self},
+        );
         log.info("Web server initialised", .{});
     }
 
     pub fn deinit(self: *Self) void {
         log.info("Shutting down web server", .{});
+        if (self.thread) |thread| {
+            log.info("Stopping thread", .{});
+            self.thread_shutdown.set();
+            thread.join();
+        }
+
+        log.info("Stopping clients", .{});
         while (self.first_used_client) |client| {
             client.deinit();
         }
         if (self.server_sockfd >= 0) {
+            log.info("Closing socket", .{});
             os.closeSocket(self.server_sockfd);
             self.server_sockfd = -1;
         }
@@ -441,40 +474,69 @@ pub const WebServer = struct {
     }
 
     pub fn update(self: *Self) !void {
+        // Do nothing for now - we're running in a thread
+        _ = self;
+    }
+
+    fn updateWorker(self: *Self) !void {
+        while (!self.thread_shutdown.isSet()) {
+            try self.updateWorkerTick();
+        }
+    }
+
+    fn updateWorkerTick(self: *Self) !void {
         // Poll for new clients
-        var server_poll = [_]os.pollfd{.{
+        var poll_count: usize = 1;
+        self.poll_list[0] = os.pollfd{
             .fd = self.server_sockfd,
             .events = os.POLL.IN,
             .revents = 0,
-        }};
-        _ = try os.poll(&server_poll, 0);
-        if ((server_poll[0].revents & os.POLL.IN) != 0) {
-            log.info("Connecting a new client", .{});
-            var sock_addr: os.sockaddr.in6 = undefined;
-            var sock_addr_len: u32 = @sizeOf(@TypeOf(sock_addr));
-            const client_sockfd = try os.accept(
-                self.server_sockfd,
-                @ptrCast(*os.sockaddr, &sock_addr),
-                &sock_addr_len,
-                0,
-            );
-            errdefer os.close(client_sockfd);
-            if (sock_addr.family != os.AF.INET6) {
-                return error.UnexpectedSocketFamilyOnAccept;
-            }
-            if (self.first_free_client) |client| {
-                client.init(client_sockfd, &sock_addr);
-            } else {
-                return error.TooManyClients;
-            }
-            log.info("Client connected", .{});
-        }
+        };
+        self.poll_clients[0] = null;
 
-        // Update clients
         {
             var client_chain: ?*ClientState = self.first_used_client;
             while (client_chain) |client| {
                 client_chain = client.next;
+                self.poll_list[poll_count] = os.pollfd{
+                    .fd = client.sockfd,
+                    .events = client.expectedPollEvents(),
+                    .revents = 0,
+                };
+                self.poll_clients[poll_count] = client;
+                poll_count += 1;
+            }
+        }
+
+        const polls_to_read = try os.poll(self.poll_list[0..poll_count], POLL_TIMEOUT_MSEC);
+        if (polls_to_read == 0) return;
+        for (0..poll_count) |i| {
+            const p = &self.poll_list[i];
+            if (p.fd == self.server_sockfd) {
+                // Update server
+                if ((p.revents & os.POLL.IN) != 0) {
+                    log.info("Connecting a new client", .{});
+                    var sock_addr: os.sockaddr.in6 = undefined;
+                    var sock_addr_len: u32 = @sizeOf(@TypeOf(sock_addr));
+                    const client_sockfd = try os.accept(
+                        self.server_sockfd,
+                        @ptrCast(*os.sockaddr, &sock_addr),
+                        &sock_addr_len,
+                        0,
+                    );
+                    errdefer os.close(client_sockfd);
+                    if (sock_addr.family != os.AF.INET6) {
+                        return error.UnexpectedSocketFamilyOnAccept;
+                    }
+                    if (self.first_free_client) |client| {
+                        client.init(client_sockfd, &sock_addr);
+                    } else {
+                        return error.TooManyClients;
+                    }
+                    log.info("Client connected", .{});
+                }
+            } else if (self.poll_clients[i]) |client| {
+                // Update client
                 // On failure, Let It Crash(tm)
                 client.update() catch |err| {
                     log.err("HTTP client error, terminating: {}", .{err});
