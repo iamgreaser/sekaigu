@@ -16,9 +16,8 @@ const WebServer = if (builtin.target.isWasm())
     struct {
         const Self = @This();
 
-        pub fn init(self: *Self, allocator: Allocator) !void {
+        pub fn init(self: *Self) !void {
             _ = self;
-            _ = allocator;
         }
 
         pub fn deinit(self: *Self) void {
@@ -268,7 +267,7 @@ pub fn init() !void {
     errdefer font_renderer.free();
 
     // Create a web server
-    try webserver.init(main_allocator);
+    try webserver.init();
     errdefer webserver.deinit();
 
     // Compile the shaders

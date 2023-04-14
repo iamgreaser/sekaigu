@@ -2,7 +2,6 @@ const builtin = @import("builtin");
 const std = @import("std");
 const os = std.os;
 const log = std.log.scoped(.webserver);
-const Allocator = std.mem.Allocator;
 const http = std.http;
 
 // TODO: Allow a custom port --GM
@@ -353,7 +352,6 @@ const ClientState = struct {
 
 pub const WebServer = struct {
     const Self = @This();
-    allocator: Allocator = undefined,
     server_sockfd: os.socket_t = -1,
     clients: [MAX_CLIENTS]ClientState = [1]ClientState{ClientState{}} ** MAX_CLIENTS,
     first_free_client: ?*ClientState = null,
@@ -389,7 +387,7 @@ pub const WebServer = struct {
         .status = .not_found,
     };
 
-    pub fn init(self: *Self, allocator: Allocator) !void {
+    pub fn init(self: *Self) !void {
         log.info("Initialising web server", .{});
         var server_sockfd = try os.socket(os.AF.INET6, os.SOCK.STREAM | os.SOCK.NONBLOCK, os.IPPROTO.TCP);
         errdefer os.closeSocket(server_sockfd);
@@ -418,7 +416,6 @@ pub const WebServer = struct {
         try os.listen(server_sockfd, CONN_BACKLOG);
 
         self.* = Self{
-            .allocator = allocator,
             .server_sockfd = server_sockfd,
         };
         // Create free chain
