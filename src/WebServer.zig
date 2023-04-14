@@ -24,11 +24,18 @@ pub const CONN_BACKLOG = 10;
 //
 // TODO: Windows support - that is, we're likely to need select() instead of poll()... but not sure why select() isn't defined in os.linux? --GM
 //
+const HttpConnectionType = enum {
+    close,
+    // Both capitalisations are a thing and it's stupid and ill-defined. --GM
+    @"Keep-Alive",
+    @"keep-alive",
+};
+
 const HttpRequest = struct {
     const Self = @This();
     method: ?http.Method = null,
     headers: struct {
-        // TODO! --GM
+        Connection: ?HttpConnectionType = .close,
     } = .{},
     path_buf: [PATH_BUF_SIZE]u8 = undefined,
     path: ?[]u8 = null,
@@ -40,6 +47,7 @@ const HttpResponse = struct {
     headers: struct {
         @"Content-Type": ?[]const u8 = null,
         @"Content-Length": ?usize = null,
+        Connection: ?HttpConnectionType = .close,
     } = .{},
     header_idx: usize = 0,
     body_written: usize = 0,
@@ -73,9 +81,7 @@ const ClientState = struct {
     pub fn init(self: *Self, sockfd: os.fd_t, addr: *os.sockaddr.in6) void {
         self.sockfd = sockfd;
         self.addr = addr.*;
-        self.state = .ReadCommand;
-        self.accum_buf_used = 0;
-        self.request = HttpRequest{};
+        self.initNextRequest();
         self.moveRing(&self.parent.?.first_free_client, &self.parent.?.first_used_client);
     }
 
@@ -90,6 +96,13 @@ const ClientState = struct {
         self.request = null;
         self.response = null;
         log.debug("Client closed", .{});
+    }
+
+    fn initNextRequest(self: *Self) void {
+        self.state = .ReadCommand;
+        self.accum_buf_used = 0;
+        self.request = HttpRequest{};
+        self.response = null;
     }
 
     pub fn update(self: *Self) !void {
@@ -118,7 +131,14 @@ const ClientState = struct {
                         //log.debug("Send: {d} <<{s}>>", .{ sentlen, sent });
                         self.accum_buf_sent += sentlen;
                     } else if (self.state == .WriteFlushClose) {
-                        self.deinit();
+                        switch (self.response.?.headers.Connection.?) {
+                            .close => {
+                                self.deinit();
+                            },
+                            .@"keep-alive", .@"Keep-Alive" => {
+                                self.initNextRequest();
+                            },
+                        }
                         return;
                     } else {
                         self.accum_buf_sent = 0;
@@ -280,9 +300,27 @@ const ClientState = struct {
     }
 
     fn handleHeader(self: *Self, name: []const u8, value: []const u8) !void {
-        // TODO! --GM
-        _ = self;
         log.debug("Handling header: \"{s}\" value: \"{s}\"", .{ name, value });
+        const request = &self.request.?;
+        inline for (@typeInfo(@TypeOf(request.headers)).Struct.fields) |field| {
+            if (std.mem.eql(u8, field.name, name)) {
+                const realType = @typeInfo(field.type).Optional.child;
+                switch (@typeInfo(realType)) {
+                    .Enum => |ti| {
+                        inline for (ti.fields) |ef| {
+                            if (std.mem.eql(u8, ef.name, value)) {
+                                @field(request.headers, field.name) = @intToEnum(realType, ef.value);
+                                return;
+                            }
+                        }
+                        // Otherwise, log and warn.
+                        log.warn("Unhandled enum \"{s}\" value \"{s}\"", .{ name, value });
+                    },
+                    else => unreachable,
+                }
+                return;
+            }
+        }
     }
 
     fn prepareResponse(self: *Self) !void {
@@ -466,6 +504,7 @@ pub const WebServer = struct {
             .status = info.status,
             .headers = .{
                 .@"Content-Type" = info.mime,
+                .Connection = request.headers.Connection.?,
             },
             .body_buf = info.blob,
         };
