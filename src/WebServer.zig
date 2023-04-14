@@ -132,7 +132,7 @@ const ClientState = struct {
                             self.accum_buf[self.accum_buf_sent..self.accum_buf_used],
                             os.MSG.DONTWAIT,
                         ) catch |err| switch (err) {
-                            error.WouldBlock => return, // Skip if we've run out of stuff to send.
+                            error.WouldBlock => return, // Skip if we're unable to send.
                             else => return err,
                         };
                         //const sent = self.accum_buf[self.accum_buf_sent..][0..sentlen];
@@ -154,7 +154,10 @@ const ClientState = struct {
                         self.accum_buf_used += switch (self.state) {
                             .WriteCommand => try self.updateWriteCommand(self.accum_buf[self.accum_buf_used..]),
                             .WriteHeaders => try self.updateWriteHeaders(self.accum_buf[self.accum_buf_used..]),
-                            .WriteBody => try self.updateWriteBody(self.accum_buf[self.accum_buf_used..]),
+                            .WriteBody => self.updateWriteBody() catch |err| switch (err) {
+                                error.WouldBlock => return, // Skip if we're unable to send.
+                                else => return err,
+                            },
                             else => unreachable,
                         };
                     }
@@ -198,16 +201,21 @@ const ClientState = struct {
         return (try std.fmt.bufPrint(buf, "\r\n", .{})).len;
     }
 
-    fn updateWriteBody(self: *Self, buf: []u8) !usize {
+    fn updateWriteBody(self: *Self) !usize {
         const response = &(self.response.?);
         const remain = response.body_buf[response.body_written..];
-        const remain_len = @min(remain.len, buf.len);
-        std.mem.copy(u8, buf, remain[0..remain_len]);
-        response.body_written += remain_len;
+        const sentlen = try os.send(
+            self.sockfd,
+            remain,
+            os.MSG.DONTWAIT,
+        ); // error.WouldBlock will be caught from above
+        //log.debug("Sent {d}/{d}", .{ sentlen, remain.len });
+        response.body_written += sentlen;
         if (response.body_written == response.body_buf.len) {
             self.state = .WriteFlushClose;
         }
-        return remain_len;
+        // Don't fill the accum buffer, we're sending directly
+        return 0;
     }
 
     fn updateRecv(self: *Self, buf: []u8) !?usize {
