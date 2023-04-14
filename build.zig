@@ -5,6 +5,7 @@ const CompileStep = Build.CompileStep;
 const FileSource = Build.FileSource;
 
 pub fn build(b: *Build) void {
+    b.reference_trace = 100;
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 

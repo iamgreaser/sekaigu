@@ -248,7 +248,6 @@ pub fn bakeString(
         var iter = view.iterator();
         while (iter.nextCodepoint()) |codepoint| {
             const fme = font_map.get(codepoint) orelse font_map.get(0xFFFD) orelse @panic("Font missing Unicode substitution character!");
-            log.warn("glyph {x} {d}", .{ codepoint, fme.xstep });
             const x0: f32 = xoffs + @intToFloat(f32, fme.dstxoffs) / 16.0 * unit_size;
             const y0: f32 = yoffs - @intToFloat(f32, fme.dstyoffs) / 16.0 * unit_size;
             const x1: f32 = x0 + @intToFloat(f32, fme.xsize) / 16.0 * unit_size;

@@ -16,12 +16,12 @@ const WebServer = if (builtin.target.isWasm())
     struct {
         const Self = @This();
 
-        pub fn new(allocator: Allocator) !Self {
+        pub fn init(self: *Self, allocator: Allocator) !void {
+            _ = self;
             _ = allocator;
-            return Self{};
         }
 
-        pub fn free(self: *Self) void {
+        pub fn deinit(self: *Self) void {
             _ = self;
         }
 
@@ -30,7 +30,7 @@ const WebServer = if (builtin.target.isWasm())
         }
     }
 else
-    @import("WebServer.zig");
+    @import("WebServer.zig").WebServer;
 
 const gl = @import("gl.zig");
 const shadermagic = @import("shadermagic.zig");
@@ -268,8 +268,8 @@ pub fn init() !void {
     errdefer font_renderer.free();
 
     // Create a web server
-    webserver = try WebServer.new(main_allocator);
-    errdefer webserver.free();
+    try webserver.init(main_allocator);
+    errdefer webserver.deinit();
 
     // Compile the shaders
     shader_prog = try shader_src.compileProgram();
@@ -341,7 +341,7 @@ pub fn init() !void {
 }
 
 pub fn destroy() void {
-    webserver.free();
+    webserver.deinit();
     gfx.free();
 }
 
