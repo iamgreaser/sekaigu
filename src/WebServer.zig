@@ -169,10 +169,11 @@ const ClientState = struct {
 
     fn updateWriteCommand(self: *Self, buf: []u8) !usize {
         const response = &(self.response.?);
+        const status = response.status;
         const result = (try std.fmt.bufPrint(
             buf,
             "HTTP/1.1 {d} {s}\r\n",
-            .{ response.status, response.status.phrase() orelse "???" },
+            .{ @enumToInt(status), status.phrase() orelse "???" },
         )).len;
         self.state = .WriteHeaders;
         return result;
