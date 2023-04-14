@@ -8,7 +8,7 @@ const http = std.http;
 // TODO: Allow a custom port --GM
 pub const PORT = 10536;
 pub const MAX_CLIENTS = 128;
-pub const CLIENT_BUF_SIZE = 128;
+pub const CLIENT_BUF_SIZE = 192;
 pub const PATH_BUF_SIZE = 64;
 pub const CONN_BACKLOG = 10;
 
