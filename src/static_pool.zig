@@ -6,7 +6,7 @@ pub fn StaticPoolChainedItem(comptime Item: type) type {
         const Self = @This();
         prev_next_pptr: *?*Self = undefined,
         next: ?*Self = null,
-        child: Item = Item{},
+        child: Item = undefined,
 
         pub const Iter = struct {
             current: ?*Self,

@@ -224,7 +224,7 @@ pub const WebServer = struct {
             } else if (self.poll_clients[i]) |client| {
                 // Update client
                 // On failure, Let It Crash(tm)
-                client.update() catch |err| {
+                client.update((p.revents & os.POLL.IN) != 0) catch |err| {
                     log.err("HTTP client error, terminating: {}", .{err});
                     client.deinit();
                 };

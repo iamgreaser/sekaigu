@@ -2,6 +2,8 @@ const std = @import("std");
 const log = std.log.scoped(.webserver_request);
 const http = std.http;
 
+pub const RESPONSE_ACCUM_BUF_SIZE = 192;
+
 const http_types = @import("http_types.zig");
 const ConnectionType = http_types.ConnectionType;
 
@@ -21,13 +23,18 @@ pub fn Response(comptime Parent: type) type {
             headers: Headers,
         };
 
-        parent: ?*Parent = null,
-        status: http.Status = .internal_server_error,
-        body_buf: ?[]const u8 = null,
-        headers: Headers = .{},
+        parent: ?*Parent,
+        status: http.Status,
+        body_buf: ?[]const u8,
+        headers: Headers,
+
+        accum_buf: [RESPONSE_ACCUM_BUF_SIZE]u8 = undefined,
+        accum_buf_used: usize = 0,
+        accum_buf_sent: usize = 0,
 
         header_idx: usize = 0,
         body_written: usize = 0,
+
         state: enum(u8) {
             WriteCommand,
             WriteHeaders,
@@ -36,10 +43,12 @@ pub fn Response(comptime Parent: type) type {
         } = .WriteCommand,
 
         pub fn init(self: *Self, options: InitOptions) !void {
-            self.parent = options.parent;
-            self.status = options.status;
-            self.body_buf = options.body_buf;
-            self.headers = options.headers;
+            self.* = Self{
+                .parent = options.parent,
+                .status = options.status,
+                .body_buf = options.body_buf,
+                .headers = options.headers,
+            };
         }
 
         pub fn deinit(self: *Self) void {

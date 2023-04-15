@@ -3,6 +3,7 @@ const log = std.log.scoped(.webserver_request);
 const http = std.http;
 
 pub const PATH_BUF_SIZE = 64;
+pub const REQUEST_ACCUM_BUF_SIZE = 192;
 
 const http_types = @import("http_types.zig");
 const ConnectionType = http_types.ConnectionType;
@@ -16,11 +17,16 @@ pub fn Request(comptime Parent: type) type {
         pub const InitOptions = struct {
             parent: *Parent,
         };
-        parent: ?*Parent = null,
+
+        parent: *Parent,
+
         method: ?http.Method = null,
         headers: Headers = .{},
         path_buf: [PATH_BUF_SIZE]u8 = undefined,
         path: ?[]u8 = null,
+
+        accum_buf: [REQUEST_ACCUM_BUF_SIZE]u8 = undefined,
+        accum_buf_used: usize = 0,
 
         state: enum(u8) {
             ReadCommand,
@@ -30,19 +36,64 @@ pub fn Request(comptime Parent: type) type {
         } = .ReadCommand,
 
         pub fn init(self: *Self, options: InitOptions) !void {
-            self.parent = options.parent;
+            self.* = Self{
+                .parent = options.parent,
+            };
         }
 
         pub fn deinit(self: *Self) void {
-            self.parent = null;
+            _ = self;
         }
 
         pub fn isDone(self: *const Self) bool {
             return self.state == .Done;
         }
 
+        pub fn update(self: *Self) !bool {
+            // TODO: Ensure that any extra crap that was sent gets handled as part of a new request --GM
+            if (self.state == .Done) return false;
+            if (!try self.updateRecvBuf(self.accum_buf[self.accum_buf_used..])) return false;
+            try self.updateRecvSplitLines();
+            return true;
+        }
+
+        fn updateRecvBuf(self: *Self, buf: []u8) !bool {
+            if (buf.len == 0) {
+                return error.LineTooLong;
+            }
+            const recvlen = self.parent.read(buf) catch |err| switch (err) {
+                error.WouldBlock => return false, // Skip if we've run out of stuff to consume.
+                else => return err,
+            };
+            if (recvlen == 0) {
+                return error.EndOfStream;
+            }
+            self.accum_buf_used += recvlen;
+            return true;
+        }
+
+        fn updateRecvSplitLines(self: *Self) !void {
+            const CRLF = "\r\n";
+            var begoffs: usize = 0;
+            splitting: while (std.mem.indexOfPos(u8, self.accum_buf[0..self.accum_buf_used], begoffs, CRLF)) |pos| {
+                const keep_splitting = try self.parseLine(self.accum_buf[begoffs..pos]);
+                begoffs = pos + 2;
+                if (!keep_splitting) {
+                    break :splitting;
+                }
+            }
+            // Remove consumed lines
+            if (self.accum_buf_used != 0) {
+                std.mem.copy(
+                    u8,
+                    self.accum_buf[0..self.accum_buf_used],
+                    self.accum_buf[begoffs..self.accum_buf_used],
+                );
+                self.accum_buf_used -= begoffs;
+            }
+        }
+
         pub fn parseLine(self: *Self, line: []const u8) !bool {
-            // TODO! --GM
             log.debug("In Line: {d} <<{s}>>", .{ line.len, line });
             switch (self.state) {
                 .ReadCommand => {
