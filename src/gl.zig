@@ -93,30 +93,32 @@ pub fn activeTexture(idx: usize) !void {
 
 pub fn vertexAttribPointer(idx: C.GLuint, comptime ptr_type: type, comptime field_name: []const u8) !void {
     const field_type = @TypeOf(@field(@intToPtr(*allowzero ptr_type, 0), field_name));
+    const base_field_type = switch (@typeInfo(field_type)) {
+        .Array => |ti| ti.child,
+        else => field_type,
+    };
+
     C.glVertexAttribPointer(
         idx,
-        switch (@typeInfo(field_type).Array.len) {
-            1, 2, 3, 4 => |v| v,
-            else => {
-                @compileError("unhandled length for " ++ field_name);
+        switch (@typeInfo(field_type)) {
+            .Array => |ti| switch (ti.len) {
+                1, 2, 3, 4 => |v| v,
+                else => @compileError("unhandled length for " ++ field_name),
             },
+            else => 1,
         },
-        switch (@typeInfo(field_type).Array.child) {
+        switch (base_field_type) {
             u8 => C.GL_UNSIGNED_BYTE,
             u16 => C.GL_UNSIGNED_SHORT,
             i8 => C.GL_BYTE,
             i16 => C.GL_SHORT,
             f32 => C.GL_FLOAT,
-            else => {
-                @compileError("unhandled element type for " ++ field_name);
-            },
+            else => @compileError("unhandled element type for " ++ field_name),
         },
-        switch (@typeInfo(field_type).Array.child) {
+        switch (base_field_type) {
             u8, u16, i8, i16 => C.GL_TRUE,
             f32 => C.GL_FALSE,
-            else => {
-                @compileError("unhandled normalisation for " ++ field_name);
-            },
+            else => @compileError("unhandled normalisation for " ++ field_name),
         },
         @sizeOf(ptr_type),
         if (comptime builtin.target.isWasm())
@@ -153,9 +155,7 @@ pub fn drawElements(mode: DrawMode, first: usize, count: usize, comptime elem_ty
         switch (elem_type) {
             u8 => C.GL_UNSIGNED_BYTE,
             u16 => C.GL_UNSIGNED_SHORT,
-            else => {
-                @compileError("unhandled element index type");
-            },
+            else => @compileError("unhandled element index type"),
         },
         if (comptime builtin.target.isWasm())
             @intCast(C.GLintptr, first * @sizeOf(elem_type))

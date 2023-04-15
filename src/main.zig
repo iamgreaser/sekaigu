@@ -326,14 +326,14 @@ pub fn init() !void {
         .{ 0.0, 1.0, -1.0, -5.0 / 2.0 },
         .{ 0.0, 1.0, 1.0, -5.0 / 2.0 },
     });
-    //log.warn("baked {any}", .{(model_pyramid orelse unreachable).va});
-    //log.warn("baked {any}", .{(model_pyramid orelse unreachable).idx_list});
+    //log.warn("baked {any}", .{model_pyramid.?.va});
+    //log.warn("baked {any}", .{model_pyramid.?.idx_list});
 
     // Load the VBOs
     try model_base.load();
     try model_floor.load();
-    try (model_pyramid orelse unreachable).load();
-    try (font_renderer.model_fonttest orelse unreachable).load();
+    try model_pyramid.?.load();
+    try font_renderer.model_fonttest.?.load();
 
     // Start our timer
     timer = if (TIMERS_EXIST) try time.Timer.start() else DUMMY_TIMER;
@@ -464,7 +464,7 @@ pub fn drawScene() !void {
             gfxstate.shader_uniforms.mmodel = Mat4f.I
                 .translate(-5.0, -2.0, -10.0); //.rotate(-model_zrot, 0.0, 1.0, 0.0);
             try shadermagic.loadUniforms(&textured_prog, @TypeOf(gfxstate.shader_uniforms), &gfxstate.shader_uniforms, &textured_prog_unicache);
-            try (model_pyramid orelse unreachable).draw(.Triangles);
+            try model_pyramid.?.draw(.Triangles);
         }
 
         {
@@ -501,9 +501,9 @@ pub fn drawScene() !void {
             defer gl.unuseProgram() catch {};
             gfxstate.shader_uniforms.font_color = Vec4f.new(.{ 0.5, 0.7, 1.0, 1.0 });
             gfxstate.shader_uniforms.mmodel = Mat4f.I
-                .translate(0.0, 2.0, -2.0);
+                .translate(0.0, 0.0, -1.0);
             try shadermagic.loadUniforms(&font_renderer.bb_font_prog, @TypeOf(gfxstate.shader_uniforms), &gfxstate.shader_uniforms, &font_renderer.bb_font_prog_unicache);
-            try (font_renderer.model_fonttest orelse unreachable).draw(.Triangles);
+            try font_renderer.model_fonttest.?.draw(.Triangles);
         }
     }
 }

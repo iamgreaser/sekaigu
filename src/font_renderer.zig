@@ -23,53 +23,59 @@ const FontGlyphInfo = struct {
 };
 var font_map: std.AutoHashMap(u24, FontGlyphInfo) = undefined;
 
-pub const model_fonttest_showatlas = Model(VA_P3F_BP2F_T2F, u16){
-    .va = &[_]VA_P3F_BP2F_T2F{
-        .{ .pos = .{ 0.0, 16.0, 0.0 }, .bpos = .{ 0.0, 0.0 }, .tex0 = .{ 0.0, 0.0 } },
-        .{ .pos = .{ 0.0, 0.0, 0.0 }, .bpos = .{ 0.0, 0.0 }, .tex0 = .{ 0.0, 4.0 } },
-        .{ .pos = .{ 16.0, 0.0, 0.0 }, .bpos = .{ 0.0, 0.0 }, .tex0 = .{ 4.0, 4.0 } },
-        .{ .pos = .{ 16.0, 16.0, 0.0 }, .bpos = .{ 0.0, 0.0 }, .tex0 = .{ 4.0, 0.0 } },
+pub const model_fonttest_showatlas = Model(VA_P3F_BP3F_T2F_C1F, u16){
+    .va = &[_]VA_P3F_BP3F_T2F_C1F{
+        .{ .pos = .{ 0.0, 16.0, 0.0 }, .bpos = .{ 0.0, 0.0, 0.0 }, .tex0 = .{ 0.0, 0.0 }, .color = 1.0 },
+        .{ .pos = .{ 0.0, 0.0, 0.0 }, .bpos = .{ 0.0, 0.0, 0.0 }, .tex0 = .{ 0.0, 4.0 }, .color = 1.0 },
+        .{ .pos = .{ 16.0, 0.0, 0.0 }, .bpos = .{ 0.0, 0.0, 0.0 }, .tex0 = .{ 4.0, 4.0 }, .color = 1.0 },
+        .{ .pos = .{ 16.0, 16.0, 0.0 }, .bpos = .{ 0.0, 0.0, 0.0 }, .tex0 = .{ 4.0, 0.0 }, .color = 1.0 },
     },
     .idx_list = &[_]u16{
         0, 1, 2,
         0, 2, 3,
     },
 };
-pub var model_fonttest: ?Model(VA_P3F_BP2F_T2F, u16) = null;
+pub var model_fonttest: ?Model(VA_P3F_BP3F_T2F_C1F, u16) = null;
 
-const VA_P3F_BP2F_T2F = struct {
+const VA_P3F_BP3F_T2F_C1F = struct {
     pos: [3]f32, // origin in 3D space
-    bpos: [2]f32, // billboard position offset in metres (3D space) or pixels (2D space)
+    bpos: [3]f32, // billboard position offset in metres (3D space) or pixels (2D space)
     tex0: [2]f32, // note: floor(x) selects channel, floor(y) selects bit to use
+    color: f32, // black through white
 };
 const bb_font_src = shadermagic.makeShaderSource(.{
     .uniform_type = @TypeOf(gfxstate.shader_uniforms),
-    .attrib_type = VA_P3F_BP2F_T2F,
+    .attrib_type = VA_P3F_BP3F_T2F_C1F,
     .varyings = &[_]shadermagic.MakeShaderSourceOptions.FieldEntry{
         .{ "vec2", "vtex0" },
+        .{ "vec4", "vcolor" },
     },
     .vert = (
         \\void main () {
         \\    vtex0 = itex0.st;
+        \\    vcolor = vec4(icolor * font_color.rgb, font_color.a);
         \\    vec4 rwpos = mmodel * ipos;
         \\    vec4 rspos = mcam * rwpos;
-        \\    vec4 rpos = mproj * (rspos + vec4(ibpos.xy, 0.0, 0.0));
+        \\    vec4 rpos = mproj * (rspos + vec4(ibpos.xyz, 0.0));
         \\    gl_Position = rpos;
         \\}
     ),
     .frag = (
-        \\void main () {
-        \\    vec2 chn0 = floor(vtex0);
+        \\bool fontbit (vec2 t0) {
+        \\    vec2 chn0 = floor(t0);
         \\    vec2 tex0 = vtex0 - chn0;
-        \\    vec4 t0sample = texture2D(smp0, tex0);// - 0.5/1024.0);
+        \\    vec4 t0sample = texture2D(smp0, tex0);
         \\    float t0maskf = (chn0.x < 2.0
         \\        ? (chn0.x < 1.0 ? t0sample.r : t0sample.g)
         \\        : (chn0.x < 3.0 ? t0sample.b : t0sample.a));
         \\    t0maskf = (t0maskf * 15.0 + 0.5) / 16.0;
-        \\    bool t0val = mod(t0maskf*pow(2.0, chn0.y), 1.0) >= 0.5;
-        \\    //bool t0val = fract(t0maskf) >= 0.5;
+        \\    return mod(t0maskf*pow(2.0, chn0.y), 1.0) >= 0.5;
+        \\}
+        \\
+        \\void main () {
+        \\    bool t0val = fontbit(vtex0);
         \\    if (!t0val) discard;
-        \\    gl_FragColor = (t0val ? font_color : vec4(0.0, 0.0, 0.0, 1.0));
+        \\    gl_FragColor = (t0val ? vcolor : vec4(0.0, 0.0, 0.0, 1.0));
         \\}
     ),
 });
@@ -219,7 +225,7 @@ pub fn bakeString(
     ypivot: f32,
     unit_size: f32,
     str: []const u8,
-) !Model(VA_P3F_BP2F_T2F, u16) {
+) !Model(VA_P3F_BP3F_T2F_C1F, u16) {
     const view = try std.unicode.Utf8View.init(str);
 
     // Compute width
@@ -236,9 +242,9 @@ pub fn bakeString(
         }
     }
 
-    var va = try allocator.alloc(VA_P3F_BP2F_T2F, charcount * 4);
+    var va = try allocator.alloc(VA_P3F_BP3F_T2F_C1F, charcount * 4 * 5);
     errdefer allocator.free(va);
-    var idx_list = try allocator.alloc(u16, charcount * 3 * 2);
+    var idx_list = try allocator.alloc(u16, charcount * 3 * 2 * 5);
     errdefer allocator.free(idx_list);
     var vapos: usize = 0;
     var idxpos: usize = 0;
@@ -260,23 +266,38 @@ pub fn bakeString(
             //const ty0: f32 = 0.0;
             //const tx1: f32 = 0.0;
             //const ty1: f32 = 0.0;
-            va[vapos + 0] = VA_P3F_BP2F_T2F{ .pos = .{ 0.0, 0.0, 0.0 }, .bpos = .{ x0, y0 }, .tex0 = .{ tx0, ty0 } };
-            va[vapos + 1] = VA_P3F_BP2F_T2F{ .pos = .{ 0.0, 0.0, 0.0 }, .bpos = .{ x0, y1 }, .tex0 = .{ tx0, ty1 } };
-            va[vapos + 2] = VA_P3F_BP2F_T2F{ .pos = .{ 0.0, 0.0, 0.0 }, .bpos = .{ x1, y1 }, .tex0 = .{ tx1, ty1 } };
-            va[vapos + 3] = VA_P3F_BP2F_T2F{ .pos = .{ 0.0, 0.0, 0.0 }, .bpos = .{ x1, y0 }, .tex0 = .{ tx1, ty0 } };
-            idx_list[idxpos + 0] = @intCast(u16, vapos + 0);
-            idx_list[idxpos + 1] = @intCast(u16, vapos + 1);
-            idx_list[idxpos + 2] = @intCast(u16, vapos + 2);
-            idx_list[idxpos + 3] = @intCast(u16, vapos + 0);
-            idx_list[idxpos + 4] = @intCast(u16, vapos + 2);
-            idx_list[idxpos + 5] = @intCast(u16, vapos + 3);
-            vapos += 4;
-            idxpos += 6;
+            const halfoffs = unit_size / 16.0 / 2.0;
+            const zoffs = 0.001;
+            const offstab = [_][4]f32{
+                .{ 0.0, 0.0, 0.0, 1.0 },
+                .{ -halfoffs, 0.0, -zoffs, 0.0 },
+                .{ 0.0, -halfoffs, -zoffs, 0.0 },
+                .{ halfoffs, 0.0, -zoffs, 0.0 },
+                .{ 0.0, halfoffs, -zoffs, 0.0 },
+            };
+            for (offstab) |o| {
+                const ox = o[0];
+                const oy = o[1];
+                const oz = o[2];
+                const oc = o[3];
+                va[vapos + 0] = VA_P3F_BP3F_T2F_C1F{ .pos = .{ 0.0, 0.0, 0.0 }, .bpos = .{ x0 + ox, y0 + oy, oz }, .tex0 = .{ tx0, ty0 }, .color = oc };
+                va[vapos + 1] = VA_P3F_BP3F_T2F_C1F{ .pos = .{ 0.0, 0.0, 0.0 }, .bpos = .{ x0 + ox, y1 + oy, oz }, .tex0 = .{ tx0, ty1 }, .color = oc };
+                va[vapos + 2] = VA_P3F_BP3F_T2F_C1F{ .pos = .{ 0.0, 0.0, 0.0 }, .bpos = .{ x1 + ox, y1 + oy, oz }, .tex0 = .{ tx1, ty1 }, .color = oc };
+                va[vapos + 3] = VA_P3F_BP3F_T2F_C1F{ .pos = .{ 0.0, 0.0, 0.0 }, .bpos = .{ x1 + ox, y0 + oy, oz }, .tex0 = .{ tx1, ty0 }, .color = oc };
+                idx_list[idxpos + 0] = @intCast(u16, vapos + 0);
+                idx_list[idxpos + 1] = @intCast(u16, vapos + 1);
+                idx_list[idxpos + 2] = @intCast(u16, vapos + 2);
+                idx_list[idxpos + 3] = @intCast(u16, vapos + 0);
+                idx_list[idxpos + 4] = @intCast(u16, vapos + 2);
+                idx_list[idxpos + 5] = @intCast(u16, vapos + 3);
+                vapos += 4;
+                idxpos += 6;
+            }
             // Advance
             xoffs += @intToFloat(f32, fme.xstep) / 16.0 * unit_size;
         }
     }
-    var result = Model(VA_P3F_BP2F_T2F, u16){
+    var result = Model(VA_P3F_BP3F_T2F_C1F, u16){
         .va = va,
         .idx_list = idx_list,
         .allocator = allocator,
