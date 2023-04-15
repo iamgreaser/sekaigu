@@ -1,5 +1,4 @@
 //! A static pool of objects with a fixed length.
-//! FIXME: Once again I've found a way to crash the Zig compiler. Using something else for now. --GM
 
 pub fn StaticPoolChainedItem(comptime Item: type) type {
     return struct {
