@@ -43,10 +43,11 @@ const HttpRequest = struct {
 const HttpResponse = struct {
     const Self = @This();
     status: http.Status,
-    body_buf: []const u8,
+    body_buf: ?[]const u8,
     headers: struct {
         @"Content-Type": ?[]const u8 = null,
         @"Content-Length": ?usize = null,
+        Location: ?[]const u8 = null,
         Connection: ?HttpConnectionType = .close,
     } = .{},
     header_idx: usize = 0,
@@ -99,6 +100,7 @@ const ClientState = struct {
     }
 
     fn initNextRequest(self: *Self) void {
+        log.debug("Prepping next request", .{});
         self.state = .ReadCommand;
         self.accum_buf_used = 0;
         self.request = HttpRequest{};
@@ -190,9 +192,19 @@ const ClientState = struct {
                         buf,
                         switch (field.type) {
                             []const u8, []u8, ?[]const u8, ?[]u8 => "{s}: {s}\r\n",
-                            else => "{s}: {any}\r\n",
+                            else => switch (@typeInfo(field.type)) {
+                                .Enum => "{s}: {s}\r\n",
+                                else => "{s}: {any}\r\n",
+                            },
                         },
-                        .{ field.name, value },
+                        .{
+                            field.name, switch (@typeInfo(field.type)) {
+                                .Enum => |eti| switch (value) {
+                                    inline eti.fields => |efield| efield.name,
+                                },
+                                else => value,
+                            },
+                        },
                     )).len;
                 }
             }
@@ -204,15 +216,20 @@ const ClientState = struct {
 
     fn updateWriteBody(self: *Self) !usize {
         const response = &(self.response.?);
-        const remain = response.body_buf[response.body_written..];
-        const sentlen = try os.send(
-            self.sockfd,
-            remain,
-            os.MSG.DONTWAIT,
-        ); // error.WouldBlock will be caught from above
-        //log.debug("Sent {d}/{d}", .{ sentlen, remain.len });
-        response.body_written += sentlen;
-        if (response.body_written == response.body_buf.len) {
+        if (response.body_buf) |body_buf| {
+            const remain = body_buf[response.body_written..];
+            const sentlen = try os.send(
+                self.sockfd,
+                remain,
+                os.MSG.DONTWAIT,
+            ); // error.WouldBlock will be caught from above
+            //log.debug("Sent {d}/{d}", .{ sentlen, remain.len });
+            response.body_written += sentlen;
+            if (response.body_written == body_buf.len) {
+                self.state = .WriteFlushClose;
+            }
+        } else {
+            // We're done with this respons with this response. Do the next one!
             self.state = .WriteFlushClose;
         }
         // Don't fill the accum buffer, we're sending directly
@@ -342,8 +359,12 @@ const ClientState = struct {
     }
 
     fn prepareResponse(self: *Self) !void {
-        self.response = try self.parent.?.handleRequest(self, &self.request.?);
-        self.response.?.headers.@"Content-Length" = self.response.?.body_buf.len;
+        var response = try self.parent.?.handleRequest(self, &self.request.?);
+        response.headers.@"Content-Length" = if (response.body_buf) |body_buf|
+            body_buf.len
+        else
+            0;
+        self.response = response;
     }
 
     /// Moves this client from one ring to another.
@@ -385,21 +406,23 @@ pub const WebServer = struct {
     // Embedded files
     const FileNameAndBlob = struct {
         name: []const u8,
-        mime: []const u8,
-        blob: []const u8,
+        mime: ?[]const u8,
+        blob: ?[]const u8,
         status: http.Status = .ok,
+        location: ?[]const u8 = null,
     };
     const file_list = [_]FileNameAndBlob{
-        .{ .name = "/", .mime = "text/html", .blob = @embedFile("glue-page.html") },
+        .{ .name = "/", .mime = null, .blob = null, .status = .see_other, .location = "/client/" },
+        .{ .name = "/client/", .mime = "text/html", .blob = @embedFile("glue-page.html") },
 
         // Ah yes, JavaScript continues to be a pile of JavaScript.
         // - text/javascript is the original de-facto standard, and you can thank Microsoft for this.
         // - application/javascript is the official standard as per RFC4329 from 2006.
         // - application/x-javascript was apparently somewhat popular for some time.
         // If application/javascript fails, let me know. --GM
-        .{ .name = "/glue-page.js", .mime = "application/javascript", .blob = @embedFile("glue-page.js") },
+        .{ .name = "/client/glue-page.js", .mime = "application/javascript", .blob = @embedFile("glue-page.js") },
 
-        .{ .name = "/sekaigu.wasm", .mime = "application/wasm", .blob = @embedFile("sekaigu_wasm_bin") },
+        .{ .name = "/client/sekaigu.wasm", .mime = "application/wasm", .blob = @embedFile("sekaigu_wasm_bin") },
     };
 
     const err404 = FileNameAndBlob{
@@ -573,6 +596,7 @@ pub const WebServer = struct {
             .status = info.status,
             .headers = .{
                 .@"Content-Type" = info.mime,
+                .Location = info.location,
                 .Connection = switch (request.headers.Connection.?) {
                     //.close => .close,
                     .@"Keep-Alive", .@"keep-alive" => |v| v,
