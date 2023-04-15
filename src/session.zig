@@ -19,11 +19,11 @@ else
 
 pub const PlayerType = union(enum) {
     Local: *LocalPlayer,
-    Web: *WebClientState,
+    WebClient: *WebClientState,
 };
 
 pub const LocalPlayer = struct {
-    //
+    // TODO! --GM
 };
 
 const MAX_PLAYERS = 1000;
@@ -33,22 +33,65 @@ pub const Player = struct {
     pub const InitOptions = struct {
         player_type: PlayerType,
     };
+    pub const State = struct {
+        cam_rot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 }),
+        cam_pos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 }),
+        cam_drot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 0.0 }),
+        cam_dpos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 0.0 }),
+    };
     pub const SCHEMA = struct {
         id: Id,
-        cam_rot: Vec4f,
-        cam_pos: Vec4f,
-        cam_drot: Vec4f,
-        cam_dpos: Vec4f,
+        state: State,
     };
-
-    id: Id,
-    cam_rot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 }),
-    cam_pos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 }),
-    cam_drot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 0.0 }),
-    cam_dpos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 0.0 }),
 
     session: *Session,
     player_type: PlayerType,
+
+    id: Id,
+    state: State = .{},
+
+    pub const Events = struct {
+        pub const SetPos = struct {
+            const EV = @This();
+            pos: Vec4f,
+            pub fn init(pos: Vec4f) !EV {
+                return EV{ .pos = pos };
+            }
+            pub fn apply(ev: *const EV, player: *Self) !void {
+                player.state.cam_pos = ev.pos;
+            }
+        };
+        pub const SetRot = struct {
+            const EV = @This();
+            rot: Vec4f,
+            pub fn init(rot: Vec4f) !EV {
+                return EV{ .rot = rot };
+            }
+            pub fn apply(ev: *const EV, player: *Self) !void {
+                player.state.cam_rot = ev.rot;
+            }
+        };
+        pub const SetDPos = struct {
+            const EV = @This();
+            dpos: Vec4f,
+            pub fn init(dpos: Vec4f) !EV {
+                return EV{ .dpos = dpos };
+            }
+            pub fn apply(ev: *const EV, player: *Self) !void {
+                player.state.cam_dpos = ev.dpos;
+            }
+        };
+        pub const SetDRot = struct {
+            const EV = @This();
+            drot: Vec4f,
+            pub fn init(drot: Vec4f) !EV {
+                return EV{ .drot = drot };
+            }
+            pub fn apply(ev: *const EV, player: *Self) !void {
+                player.state.cam_drot = ev.drot;
+            }
+        };
+    };
 
     pub fn init(self: *Self, session: *Session, id: Self.Id, options: InitOptions) !void {
         log.info("Creating player", .{});
@@ -58,6 +101,26 @@ pub const Player = struct {
             .player_type = options.player_type,
         };
         log.info("Player created", .{});
+    }
+
+    pub fn getCurrentState(self: *const Self) State {
+        return self.state;
+    }
+
+    pub fn getPredictedState(self: *const Self, dt: f32) State {
+        var state = self.state;
+        const icam = Mat4f.I
+            .translate(state.cam_pos.a[0], state.cam_pos.a[1], state.cam_pos.a[2])
+            .rotate(-state.cam_rot.a[1], 0.0, 1.0, 0.0)
+            .rotate(-state.cam_rot.a[0], 1.0, 0.0, 0.0);
+        state.cam_pos = state.cam_pos.add(icam.mul(state.cam_dpos.mul(dt)));
+        state.cam_rot = state.cam_rot.add(state.cam_drot.mul(dt));
+        return state;
+    }
+
+    pub fn handleEvent(self: *Self, comptime TEvent: type, args: anytype) !void {
+        var ev: TEvent = try @call(.auto, TEvent.init, args);
+        try ev.apply(self);
     }
 
     pub fn deinit(self: *Self) void {
