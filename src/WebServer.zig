@@ -22,22 +22,21 @@ pub const CONN_BACKLOG = 10;
 //
 // TODO: Windows support - that is, we're likely to need select() instead of poll()... but not sure why select() isn't defined in os.linux? --GM
 //
-const ClientState = @import("WebServer/ClientState.zig").ClientState;
 const http_types = @import("WebServer/http_types.zig");
-const Request = http_types.Request;
-const Response = http_types.Response;
+const ClientState = @import("WebServer/ClientState.zig").ClientState(WebServer);
+const Request = ClientState.Request;
+const Response = ClientState.Response;
 
 pub const WebServer = struct {
     const Self = @This();
-    const TClientState = ClientState(Self);
     server_sockfd: os.socket_t = -1,
-    clients: [MAX_CLIENTS]TClientState = [1]TClientState{TClientState{}} ** MAX_CLIENTS,
-    first_free_client: ?*TClientState = null,
-    first_used_client: ?*TClientState = null,
+    clients: [MAX_CLIENTS]ClientState = [1]ClientState{ClientState{}} ** MAX_CLIENTS,
+    first_free_client: ?*ClientState = null,
+    first_used_client: ?*ClientState = null,
     thread: ?std.Thread = null,
     thread_shutdown: std.Thread.ResetEvent = .{},
     poll_list: [1 + MAX_CLIENTS]os.pollfd = undefined,
-    poll_clients: [1 + MAX_CLIENTS]?*TClientState = undefined,
+    poll_clients: [1 + MAX_CLIENTS]?*ClientState = undefined,
 
     // Embedded files
     const FileNameAndBlob = struct {
@@ -163,7 +162,7 @@ pub const WebServer = struct {
         self.poll_clients[0] = null;
 
         {
-            var client_chain: ?*TClientState = self.first_used_client;
+            var client_chain: ?*ClientState = self.first_used_client;
             while (client_chain) |client| {
                 client_chain = client.next;
                 self.poll_list[poll_count] = os.pollfd{
@@ -214,7 +213,7 @@ pub const WebServer = struct {
         }
     }
 
-    pub fn handleRequest(self: *Self, client: *TClientState, request: *Request) !Response {
+    pub fn handleRequest(self: *Self, client: *ClientState, request: *Request) !Response {
         _ = self;
         _ = client;
 

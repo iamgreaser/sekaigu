@@ -6,12 +6,12 @@ const http = std.http;
 pub const CLIENT_BUF_SIZE = 192;
 
 const http_types = @import("http_types.zig");
-const Request = http_types.Request;
-const Response = http_types.Response;
 
 pub fn ClientState(comptime Parent: type) type {
     return struct {
         const Self = @This();
+        pub const Request = @import("Request.zig").Request(Self);
+        pub const Response = @import("Response.zig").Response(Self);
         parent: ?*Parent = null,
         prev: ?*Self = null,
         next: ?*Self = null,
