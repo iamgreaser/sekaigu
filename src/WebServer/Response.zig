@@ -8,24 +8,44 @@ const ConnectionType = http_types.ConnectionType;
 pub fn Response(comptime Parent: type) type {
     return struct {
         const Self = @This();
-        parent: *Parent,
-        status: http.Status,
-        body_buf: ?[]const u8,
-        headers: struct {
+        pub const Headers = struct {
             @"Content-Type": ?[]const u8 = null,
             @"Content-Length": ?usize = null,
             Location: ?[]const u8 = null,
             Connection: ?ConnectionType = .close,
-        } = .{},
+        };
+        pub const InitOptions = struct {
+            parent: *Parent,
+            status: http.Status,
+            body_buf: ?[]const u8,
+            headers: Headers,
+        };
+
+        parent: ?*Parent = null,
+        status: http.Status = .internal_server_error,
+        body_buf: ?[]const u8 = null,
+        headers: Headers = .{},
+
         header_idx: usize = 0,
         body_written: usize = 0,
-
         state: enum(u8) {
             WriteCommand,
             WriteHeaders,
             WriteBody,
             Done,
         } = .WriteCommand,
+
+        pub fn init(self: *Self, options: InitOptions) !void {
+            self.parent = options.parent;
+            self.status = options.status;
+            self.body_buf = options.body_buf;
+            self.headers = options.headers;
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.parent = null;
+            self.body_buf = null;
+        }
 
         pub fn isDone(self: *const Self) bool {
             return self.state == .Done;
@@ -86,7 +106,7 @@ pub fn Response(comptime Parent: type) type {
         fn updateWriteBody(self: *Self) !usize {
             if (self.body_buf) |body_buf| {
                 const remain = body_buf[self.body_written..];
-                const sentlen = try self.parent.write(remain); // error.WouldBlock will be caught from above
+                const sentlen = try self.parent.?.write(remain); // error.WouldBlock will be caught from above
                 //log.debug("Sent {d}/{d}", .{ sentlen, remain.len });
                 self.body_written += sentlen;
                 if (self.body_written == body_buf.len) {

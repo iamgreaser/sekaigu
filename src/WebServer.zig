@@ -8,6 +8,8 @@ const http = std.http;
 pub const PORT = 10536;
 pub const POLL_TIMEOUT_MSEC = 200; // How often do we ensure that we wake this thread?
 pub const MAX_CLIENTS = 128;
+pub const MAX_HTTP_REQUESTS = 128;
+pub const MAX_HTTP_RESPONSES = 128;
 pub const CONN_BACKLOG = 10;
 
 const static_pool = @import("static_pool.zig");
@@ -29,14 +31,23 @@ const http_types = @import("WebServer/http_types.zig");
 const ClientState = @import("WebServer/ClientState.zig").ClientState(WebServer);
 const Request = ClientState.Request;
 const Response = ClientState.Response;
+const ChainedRequest = ClientState.ChainedRequest;
+const ChainedResponse = ClientState.ChainedResponse;
 
 pub const WebServer = struct {
     const Self = @This();
     const ClientPool = StaticPool(ClientState);
+    const RequestPool = StaticPool(Request);
+    const ResponsePool = StaticPool(Response);
 
-    server_sockfd: os.socket_t = -1,
     clients_backing: [MAX_CLIENTS]ClientPool.ChainedItem = [1]ClientPool.ChainedItem{ClientPool.ChainedItem{}} ** MAX_CLIENTS,
     clients: ClientPool = ClientPool{},
+    requests_backing: [MAX_HTTP_REQUESTS]RequestPool.ChainedItem = [1]RequestPool.ChainedItem{RequestPool.ChainedItem{}} ** MAX_HTTP_REQUESTS,
+    requests: RequestPool = RequestPool{},
+    responses_backing: [MAX_HTTP_RESPONSES]ResponsePool.ChainedItem = [1]ResponsePool.ChainedItem{ResponsePool.ChainedItem{}} ** MAX_HTTP_RESPONSES,
+    responses: ResponsePool = ResponsePool{},
+
+    server_sockfd: os.socket_t = -1,
     thread: ?std.Thread = null,
     thread_shutdown: std.Thread.ResetEvent = .{},
     poll_list: [1 + MAX_CLIENTS]os.pollfd = undefined,
@@ -105,8 +116,12 @@ pub const WebServer = struct {
         self.* = Self{
             .server_sockfd = server_sockfd,
         };
-        // Create free chain
+
+        // Create chains
         self.clients.init(&self.clients_backing);
+        self.requests.init(&self.requests_backing);
+        self.responses.init(&self.responses_backing);
+
         // Create thread
         self.thread_shutdown.reset();
         self.thread = try std.Thread.spawn(
@@ -126,6 +141,11 @@ pub const WebServer = struct {
             self.thread_shutdown.set();
             thread.join();
         }
+
+        log.info("Dropping responses", .{});
+        self.responses.deinit();
+        log.info("Dropping requests", .{});
+        self.requests.deinit();
 
         log.info("Stopping clients", .{});
         self.clients.deinit();
@@ -212,9 +232,7 @@ pub const WebServer = struct {
         }
     }
 
-    pub fn handleRequest(self: *Self, client: *ClientState, request: *Request) !Response {
-        _ = self;
-
+    pub fn handleRequest(self: *Self, client: *ClientState, request: *Request) !*ChainedResponse {
         const info: *const FileNameAndBlob = info: {
             const path = request.path.?;
             for (&file_list) |*info| {
@@ -225,7 +243,7 @@ pub const WebServer = struct {
             break :info &err404;
         };
 
-        return Response{
+        if (try self.responses.tryAcquire(.{
             .parent = client,
             .status = info.status,
             .headers = .{
@@ -240,6 +258,10 @@ pub const WebServer = struct {
                 },
             },
             .body_buf = info.blob,
-        };
+        })) |response| {
+            return response;
+        } else {
+            return error.CannotAllocateResponse;
+        }
     }
 };

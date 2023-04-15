@@ -10,11 +10,15 @@ const ConnectionType = http_types.ConnectionType;
 pub fn Request(comptime Parent: type) type {
     return struct {
         const Self = @This();
-        parent: *Parent,
-        method: ?http.Method = null,
-        headers: struct {
+        pub const Headers = struct {
             Connection: ?ConnectionType = .close,
-        } = .{},
+        };
+        pub const InitOptions = struct {
+            parent: *Parent,
+        };
+        parent: ?*Parent = null,
+        method: ?http.Method = null,
+        headers: Headers = .{},
         path_buf: [PATH_BUF_SIZE]u8 = undefined,
         path: ?[]u8 = null,
 
@@ -24,6 +28,14 @@ pub fn Request(comptime Parent: type) type {
             //ReadBody, // Supporting this would make this use more dynamic RAM allocation --GM
             Done,
         } = .ReadCommand,
+
+        pub fn init(self: *Self, options: InitOptions) !void {
+            self.parent = options.parent;
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.parent = null;
+        }
 
         pub fn isDone(self: *const Self) bool {
             return self.state == .Done;
