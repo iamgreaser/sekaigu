@@ -543,6 +543,22 @@ pub fn drawScene() !void {
             try shadermagic.loadUniforms(&font_renderer.bb_font_prog, @TypeOf(gfxstate.shader_uniforms), &gfxstate.shader_uniforms, &font_renderer.bb_font_prog_unicache);
             try font_renderer.model_fonttest.?.draw(.Triangles);
         }
+
+        {
+            try gl.useProgram(shader_prog);
+            defer gl.unuseProgram() catch {};
+            var iter = session.?.players.iterator();
+            while (iter.next()) |kv| {
+                const otherp: *const Player = kv.value_ptr.*;
+                gfxstate.shader_uniforms.mmodel = Mat4f.I
+                    .translate(otherp.cam_pos.a[0], otherp.cam_pos.a[1], otherp.cam_pos.a[2])
+                    .scale(0.1, 0.1, 0.1)
+                    .rotate(-otherp.cam_rot.a[1], 0.0, 1.0, 0.0)
+                    .rotate(-otherp.cam_rot.a[0], 1.0, 0.0, 0.0);
+                try shadermagic.loadUniforms(&shader_prog, @TypeOf(gfxstate.shader_uniforms), &gfxstate.shader_uniforms, &shader_prog_unicache);
+                try model_base.draw(.Triangles);
+            }
+        }
     }
 }
 
