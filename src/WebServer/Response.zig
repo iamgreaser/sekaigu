@@ -19,5 +19,13 @@ pub fn Response(comptime Parent: type) type {
         } = .{},
         header_idx: usize = 0,
         body_written: usize = 0,
+
+        state: enum(u8) {
+            WriteCommand,
+            WriteHeaders,
+            WriteBody,
+            WriteFlushClose,
+            Done,
+        } = .WriteCommand,
     };
 }

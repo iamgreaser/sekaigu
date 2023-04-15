@@ -24,14 +24,9 @@ pub fn ClientState(comptime Parent: type) type {
         response: ?Response = null,
 
         state: enum(u8) {
+            Read,
+            Write,
             Unconnected,
-            ReadCommand,
-            ReadHeaders,
-            //ReadBody, // Supporting this would make this use more dynamic RAM allocation --GM
-            WriteCommand,
-            WriteHeaders,
-            WriteBody,
-            WriteFlushClose,
         } = .Unconnected,
 
         /// Initialises the client state, except for the previous and next indices.
@@ -57,32 +52,39 @@ pub fn ClientState(comptime Parent: type) type {
 
         fn initNextRequest(self: *Self) void {
             log.debug("Prepping next request", .{});
-            self.state = .ReadCommand;
+            self.state = .Read;
             self.accum_buf_used = 0;
-            self.request = Request{};
+            self.request = Request{ .parent = self };
             self.response = null;
         }
 
         pub fn expectedPollEvents(self: *Self) @TypeOf(@intToPtr(*allowzero os.pollfd, 0).events) {
             return switch (self.state) {
-                .ReadCommand, .ReadHeaders => os.POLL.IN,
-                .WriteCommand, .WriteHeaders, .WriteBody, .WriteFlushClose => os.POLL.OUT,
+                .Read => os.POLL.IN,
+                .Write => os.POLL.OUT,
                 else => 0,
             };
         }
 
         pub fn update(self: *Self) !void {
             switch (self.state) {
-                .ReadCommand, .ReadHeaders => {
+                .Read => {
                     while (try self.updateRecv(self.accum_buf[self.accum_buf_used..])) |ncount| {
                         //const indata = self.accum_buf[self.accum_buf_used..][0..ncount];
                         //log.debug("Recv: {d} <<{s}>>", .{ indata.len, indata });
                         self.accum_buf_used += ncount;
                         try self.updateRecvSplitLines();
                     }
+                    if (self.request.?.state == .Done) {
+                        // Cut the accum buf short
+                        self.accum_buf_sent = 0;
+                        self.accum_buf_used = 0;
+                        // Write our response
+                        self.state = .Write;
+                    }
                 },
 
-                .WriteCommand, .WriteHeaders, .WriteBody, .WriteFlushClose => {
+                .Write => {
                     while (true) {
                         if (self.accum_buf_sent < self.accum_buf_used) {
                             const sentlen = os.send(
@@ -96,7 +98,7 @@ pub fn ClientState(comptime Parent: type) type {
                             //const sent = self.accum_buf[self.accum_buf_sent..][0..sentlen];
                             //log.debug("Send: {d} <<{s}>>", .{ sentlen, sent });
                             self.accum_buf_sent += sentlen;
-                        } else if (self.state == .WriteFlushClose) {
+                        } else if (self.response.?.state == .WriteFlushClose) {
                             switch (self.response.?.headers.Connection.?) {
                                 .close => {
                                     self.deinit();
@@ -109,7 +111,7 @@ pub fn ClientState(comptime Parent: type) type {
                         } else {
                             self.accum_buf_sent = 0;
                             self.accum_buf_used = 0;
-                            self.accum_buf_used += switch (self.state) {
+                            self.accum_buf_used += switch (self.response.?.state) {
                                 .WriteCommand => try self.updateWriteCommand(self.accum_buf[self.accum_buf_used..]),
                                 .WriteHeaders => try self.updateWriteHeaders(self.accum_buf[self.accum_buf_used..]),
                                 .WriteBody => self.updateWriteBody() catch |err| switch (err) {
@@ -133,7 +135,7 @@ pub fn ClientState(comptime Parent: type) type {
                 "HTTP/1.1 {d} {s}\r\n",
                 .{ @enumToInt(status), status.phrase() orelse "???" },
             )).len;
-            self.state = .WriteHeaders;
+            response.state = .WriteHeaders;
             return result;
         }
 
@@ -166,7 +168,7 @@ pub fn ClientState(comptime Parent: type) type {
                 }
             }
             // No more headers, now write the header terminator and move onto the body
-            self.state = .WriteBody;
+            response.state = .WriteBody;
             return (try std.fmt.bufPrint(buf, "\r\n", .{})).len;
         }
 
@@ -182,11 +184,11 @@ pub fn ClientState(comptime Parent: type) type {
                 //log.debug("Sent {d}/{d}", .{ sentlen, remain.len });
                 response.body_written += sentlen;
                 if (response.body_written == body_buf.len) {
-                    self.state = .WriteFlushClose;
+                    response.state = .WriteFlushClose;
                 }
             } else {
                 // We're done with this respons with this response. Do the next one!
-                self.state = .WriteFlushClose;
+                response.state = .WriteFlushClose;
             }
             // Don't fill the accum buffer, we're sending directly
             return 0;
@@ -210,7 +212,7 @@ pub fn ClientState(comptime Parent: type) type {
             const CRLF = "\r\n";
             var begoffs: usize = 0;
             splitting: while (std.mem.indexOfPos(u8, self.accum_buf[0..self.accum_buf_used], begoffs, CRLF)) |pos| {
-                const keep_splitting = try self.parseLine(self.accum_buf[begoffs..pos]);
+                const keep_splitting = try self.request.?.parseLine(self.accum_buf[begoffs..pos]);
                 begoffs = pos + 2;
                 if (!keep_splitting) {
                     break :splitting;
@@ -227,94 +229,7 @@ pub fn ClientState(comptime Parent: type) type {
             }
         }
 
-        fn parseLine(self: *Self, line: []const u8) !bool {
-            // TODO! --GM
-            log.debug("In Line: {d} <<{s}>>", .{ line.len, line });
-            switch (self.state) {
-                .ReadCommand => {
-                    // COMMAND path HTTP/ver
-                    if (std.mem.indexOfPos(u8, line, 0, " ")) |pos0| {
-                        if (std.mem.indexOfPos(u8, line, pos0 + 1, " ")) |pos1| {
-                            const method = line[0..pos0];
-                            const path = line[pos0 + 1 .. pos1];
-                            const httpver = line[pos1 + 1 ..];
-                            log.debug("Handling method: \"{s}\" path: \"{s}\" ver: \"{s}\"", .{ method, path, httpver });
-                            // TODO: Parse HTTP version for conformance to HTTP/1.1 --GM
-                            self.request.?.method = method: {
-                                inline for (@typeInfo(http.Method).Enum.fields) |field| {
-                                    if (std.mem.eql(u8, method, field.name)) {
-                                        break :method @intToEnum(http.Method, field.value);
-                                    }
-                                }
-                                return error.InvalidHttpMethod;
-                            };
-                            log.debug("Method: {any}", .{self.request.?.method});
-
-                            if (path.len > self.request.?.path_buf.len) {
-                                return error.PathTooLong;
-                            }
-                            self.request.?.path = self.request.?.path_buf[0..path.len];
-                            std.mem.copy(u8, self.request.?.path.?, path);
-
-                            self.state = .ReadHeaders;
-                            return true;
-                        } else {
-                            return error.InvalidHttpCommandFormat;
-                        }
-                    } else {
-                        return error.InvalidHttpCommandFormat;
-                    }
-                },
-                .ReadHeaders => {
-                    // name: value
-                    if (line.len == 0) {
-                        // End of headers
-                        // TODO: See if we want to handle POST --GM
-                        log.debug("End of headers", .{});
-                        try self.prepareResponse();
-                        self.state = .WriteCommand;
-                        // Cut the accum buf short
-                        self.accum_buf_sent = 0;
-                        self.accum_buf_used = 0;
-                        return false;
-                    } else if (std.mem.indexOfPos(u8, line, 0, ": ")) |pos0| {
-                        const name = line[0..pos0];
-                        const value = line[pos0 + 2 ..];
-                        try self.handleHeader(name, value);
-                        return true;
-                    } else {
-                        return error.InvalidHttpHeaderFormat;
-                    }
-                },
-                else => unreachable,
-            }
-        }
-
-        fn handleHeader(self: *Self, name: []const u8, value: []const u8) !void {
-            log.debug("Handling header: \"{s}\" value: \"{s}\"", .{ name, value });
-            const request = &self.request.?;
-            inline for (@typeInfo(@TypeOf(request.headers)).Struct.fields) |field| {
-                if (std.mem.eql(u8, field.name, name)) {
-                    const realType = @typeInfo(field.type).Optional.child;
-                    switch (@typeInfo(realType)) {
-                        .Enum => |ti| {
-                            inline for (ti.fields) |ef| {
-                                if (std.mem.eql(u8, ef.name, value)) {
-                                    @field(request.headers, field.name) = @intToEnum(realType, ef.value);
-                                    return;
-                                }
-                            }
-                            // Otherwise, log and warn.
-                            log.warn("Unhandled enum \"{s}\" value \"{s}\"", .{ name, value });
-                        },
-                        else => unreachable,
-                    }
-                    return;
-                }
-            }
-        }
-
-        fn prepareResponse(self: *Self) !void {
+        pub fn prepareResponse(self: *Self) !void {
             var response = try self.parent.?.handleRequest(self, &self.request.?);
             response.headers.@"Content-Length" = if (response.body_buf) |body_buf|
                 body_buf.len
