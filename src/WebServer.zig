@@ -17,7 +17,7 @@ pub const CONN_BACKLOG = 10;
 // It worked well enough for testing, but now it's time to replace it...
 // So here's our own web server. Enjoy!
 //
-// ...also, Zig's networking doesn't cut it either, as we
+// ...also, Zig's networking doesn't cut it either, as we need UDP for the non-HTTP/WebSocket stuff.
 // So we use our own!
 //
 // TODO: Windows support - that is, we're likely to need select() instead of poll()... but not sure why select() isn't defined in os.linux? --GM
