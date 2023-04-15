@@ -20,17 +20,19 @@ pub fn ClientState(comptime Parent: type) type {
             sockfd: os.fd_t,
             addr: *const os.sockaddr.in6,
         };
-        parent: ?*Parent = null,
-        sockfd: os.fd_t = 0,
-        addr: os.sockaddr.in6 = undefined,
+        parent: *Parent,
+        sockfd: os.fd_t,
+        addr: os.sockaddr.in6,
         request: ?*ChainedRequest = null,
         response: ?*ChainedResponse = null,
 
         /// Initialises the client state.
         pub fn init(self: *Self, options: InitOptions) !void {
-            self.parent = options.parent;
-            self.sockfd = options.sockfd;
-            self.addr = options.addr.*;
+            self.* = Self{
+                .parent = options.parent,
+                .sockfd = options.sockfd,
+                .addr = options.addr.*,
+            };
             try self.initNextRequest();
         }
 
@@ -41,18 +43,29 @@ pub fn ClientState(comptime Parent: type) type {
                 os.closeSocket(self.sockfd);
                 self.sockfd = 0;
             }
-            self.request = null;
-            self.response = null;
+            if (self.request) |request| {
+                self.parent.requests.release(request);
+                self.request = null;
+            }
+            if (self.response) |response| {
+                self.parent.responses.release(response);
+                self.response = null;
+            }
             log.debug("Client closed", .{});
         }
 
         fn initNextRequest(self: *Self) !void {
             log.debug("Prepping next request", .{});
-            self.request = try self.parent.?.requests.tryAcquire(.{ .parent = self });
             if (self.request == null) {
-                return error.CannotAllocateRequest;
+                self.request = try self.parent.requests.tryAcquire(.{ .parent = self });
+                if (self.request == null) {
+                    return error.CannotAllocateRequest;
+                }
             }
-            self.response = null;
+            if (self.response) |response| {
+                self.parent.responses.release(response);
+                self.response = null;
+            }
         }
 
         const ipollevents = @TypeOf(@intToPtr(*allowzero os.pollfd, 0).events);
@@ -77,6 +90,8 @@ pub fn ClientState(comptime Parent: type) type {
                     }
                     if (request.child.isDone()) {
                         try self.prepareResponse();
+                        self.parent.requests.release(request);
+                        self.request = null;
                     }
                 }
             }
@@ -100,7 +115,6 @@ pub fn ClientState(comptime Parent: type) type {
                                 try self.initNextRequest();
                             },
                         }
-                        self.response = null;
                         break :responseLoop;
                     } else {
                         response.child.accum_buf_sent = 0;
@@ -135,12 +149,11 @@ pub fn ClientState(comptime Parent: type) type {
         }
 
         fn prepareResponse(self: *Self) !void {
-            var response = try self.parent.?.handleRequest(self, &self.request.?.child);
+            var response = try self.parent.handleRequest(self, &self.request.?.child);
             response.child.headers.@"Content-Length" = if (response.child.body_buf) |body_buf|
                 body_buf.len
             else
                 0;
-            self.request = null;
             self.response = response;
         }
     };

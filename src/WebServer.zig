@@ -8,7 +8,7 @@ const http = std.http;
 pub const PORT = 10536;
 pub const POLL_TIMEOUT_MSEC = 200; // How often do we ensure that we wake this thread?
 pub const MAX_CLIENTS = 128;
-pub const MAX_HTTP_REQUESTS = 128;
+pub const MAX_HTTP_REQUESTS = 32;
 pub const MAX_HTTP_RESPONSES = 128;
 pub const CONN_BACKLOG = 10;
 
@@ -39,6 +39,7 @@ pub const WebServer = struct {
     const ClientPool = StaticPool(ClientState);
     const RequestPool = StaticPool(Request);
     const ResponsePool = StaticPool(Response);
+    const ChainedClientState = ClientPool.ChainedItem;
 
     clients_backing: [MAX_CLIENTS]ClientPool.ChainedItem = [1]ClientPool.ChainedItem{ClientPool.ChainedItem{}} ** MAX_CLIENTS,
     clients: ClientPool = ClientPool{},
@@ -51,7 +52,7 @@ pub const WebServer = struct {
     thread: ?std.Thread = null,
     thread_shutdown: std.Thread.ResetEvent = .{},
     poll_list: [1 + MAX_CLIENTS]os.pollfd = undefined,
-    poll_clients: [1 + MAX_CLIENTS]?*ClientState = undefined,
+    poll_clients: [1 + MAX_CLIENTS]?*ChainedClientState = undefined,
 
     // Embedded files
     const FileNameAndBlob = struct {
@@ -183,8 +184,8 @@ pub const WebServer = struct {
             var client_iter = self.clients.iterUsed();
             while (client_iter.next()) |client| {
                 self.poll_list[poll_count] = os.pollfd{
-                    .fd = client.sockfd,
-                    .events = client.expectedPollEvents(),
+                    .fd = client.child.sockfd,
+                    .events = client.child.expectedPollEvents(),
                     .revents = 0,
                 };
                 self.poll_clients[poll_count] = client;
@@ -199,36 +200,43 @@ pub const WebServer = struct {
             if (p.fd == self.server_sockfd) {
                 // Update server
                 if ((p.revents & os.POLL.IN) != 0) {
-                    log.info("Connecting a new client", .{});
-                    var sock_addr: os.sockaddr.in6 = undefined;
-                    var sock_addr_len: u32 = @sizeOf(@TypeOf(sock_addr));
-                    const client_sockfd = try os.accept(
-                        self.server_sockfd,
-                        @ptrCast(*os.sockaddr, &sock_addr),
-                        &sock_addr_len,
-                        0,
-                    );
-                    errdefer os.close(client_sockfd);
-                    if (sock_addr.family != os.AF.INET6) {
-                        return error.UnexpectedSocketFamilyOnAccept;
-                    }
-                    if (try self.clients.tryAcquire(.{
-                        .parent = self,
-                        .sockfd = client_sockfd,
-                        .addr = &sock_addr,
-                    }) == null) {
-                        return error.TooManyClients;
-                    }
-                    log.info("Client connected", .{});
+                    self.acceptNewClient() catch |err| {
+                        log.err("Error when attempting to accept a new client: {}", .{err});
+                    };
                 }
             } else if (self.poll_clients[i]) |client| {
                 // Update client
                 // On failure, Let It Crash(tm)
-                client.update((p.revents & os.POLL.IN) != 0) catch |err| {
+                client.child.update((p.revents & os.POLL.IN) != 0) catch |err| {
                     log.err("HTTP client error, terminating: {}", .{err});
-                    client.deinit();
+                    self.clients.release(client);
                 };
             }
+        }
+    }
+
+    fn acceptNewClient(self: *Self) !void {
+        log.info("Connecting a new client", .{});
+        var sock_addr: os.sockaddr.in6 = undefined;
+        var sock_addr_len: u32 = @sizeOf(@TypeOf(sock_addr));
+        const client_sockfd = try os.accept(
+            self.server_sockfd,
+            @ptrCast(*os.sockaddr, &sock_addr),
+            &sock_addr_len,
+            0,
+        );
+        errdefer os.close(client_sockfd);
+        if (sock_addr.family != os.AF.INET6) {
+            return error.UnexpectedSocketFamilyOnAccept;
+        }
+        if (try self.clients.tryAcquire(.{
+            .parent = self,
+            .sockfd = client_sockfd,
+            .addr = &sock_addr,
+        }) == null) {
+            return error.TooManyClients;
+        } else {
+            log.info("Client connected", .{});
         }
     }
 

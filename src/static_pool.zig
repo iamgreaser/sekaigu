@@ -11,10 +11,10 @@ pub fn StaticPoolChainedItem(comptime Item: type) type {
         pub const Iter = struct {
             current: ?*Self,
 
-            pub fn next(iter: *Iter) ?*Item {
+            pub fn next(iter: *Iter) ?*Self {
                 if (iter.current) |result| {
                     iter.current = result.next;
-                    return &result.*.child;
+                    return result;
                 } else {
                     return null;
                 }

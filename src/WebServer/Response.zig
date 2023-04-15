@@ -23,7 +23,7 @@ pub fn Response(comptime Parent: type) type {
             headers: Headers,
         };
 
-        parent: ?*Parent,
+        parent: *Parent,
         status: http.Status,
         body_buf: ?[]const u8,
         headers: Headers,
@@ -52,8 +52,7 @@ pub fn Response(comptime Parent: type) type {
         }
 
         pub fn deinit(self: *Self) void {
-            self.parent = null;
-            self.body_buf = null;
+            _ = self;
         }
 
         pub fn isDone(self: *const Self) bool {
@@ -115,7 +114,7 @@ pub fn Response(comptime Parent: type) type {
         fn updateWriteBody(self: *Self) !usize {
             if (self.body_buf) |body_buf| {
                 const remain = body_buf[self.body_written..];
-                const sentlen = try self.parent.?.write(remain); // error.WouldBlock will be caught from above
+                const sentlen = try self.parent.write(remain); // error.WouldBlock will be caught from above
                 //log.debug("Sent {d}/{d}", .{ sentlen, remain.len });
                 self.body_written += sentlen;
                 if (self.body_written == body_buf.len) {
