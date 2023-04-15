@@ -215,7 +215,6 @@ pub const WebServer = struct {
 
     pub fn handleRequest(self: *Self, client: *ClientState, request: *Request) !Response {
         _ = self;
-        _ = client;
 
         const info: *const FileNameAndBlob = info: {
             const path = request.path.?;
@@ -228,6 +227,7 @@ pub const WebServer = struct {
         };
 
         return Response{
+            .parent = client,
             .status = info.status,
             .headers = .{
                 .@"Content-Type" = info.mime,

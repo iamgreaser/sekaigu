@@ -6,9 +6,9 @@ const http_types = @import("http_types.zig");
 const ConnectionType = http_types.ConnectionType;
 
 pub fn Response(comptime Parent: type) type {
-    _ = Parent;
     return struct {
         const Self = @This();
+        parent: *Parent,
         status: http.Status,
         body_buf: ?[]const u8,
         headers: struct {
@@ -24,8 +24,80 @@ pub fn Response(comptime Parent: type) type {
             WriteCommand,
             WriteHeaders,
             WriteBody,
-            WriteFlushClose,
             Done,
         } = .WriteCommand,
+
+        pub fn isDone(self: *const Self) bool {
+            return self.state == .Done;
+        }
+
+        pub fn updateWrite(self: *Self, buf: []u8) !usize {
+            return switch (self.state) {
+                .WriteCommand => self.updateWriteCommand(buf),
+                .WriteHeaders => self.updateWriteHeaders(buf),
+                .WriteBody => self.updateWriteBody(),
+                .Done => 0,
+            };
+        }
+
+        fn updateWriteCommand(self: *Self, buf: []u8) !usize {
+            const status = self.status;
+            const result = (try std.fmt.bufPrint(
+                buf,
+                "HTTP/1.1 {d} {s}\r\n",
+                .{ @enumToInt(status), status.phrase() orelse "???" },
+            )).len;
+            self.state = .WriteHeaders;
+            return result;
+        }
+
+        fn updateWriteHeaders(self: *Self, buf: []u8) !usize {
+            const headers = &(self.headers);
+            inline for (@typeInfo(@TypeOf(headers.*)).Struct.fields, 0..) |field, i| {
+                if (i >= self.header_idx) {
+                    if (@field(headers.*, field.name)) |value| {
+                        self.header_idx = i + 1;
+                        return (try std.fmt.bufPrint(
+                            buf,
+                            switch (field.type) {
+                                []const u8, []u8, ?[]const u8, ?[]u8 => "{s}: {s}\r\n",
+                                else => switch (@typeInfo(field.type)) {
+                                    .Enum => "{s}: {s}\r\n",
+                                    else => "{s}: {any}\r\n",
+                                },
+                            },
+                            .{
+                                field.name, switch (@typeInfo(field.type)) {
+                                    .Enum => |eti| switch (value) {
+                                        inline eti.fields => |efield| efield.name,
+                                    },
+                                    else => value,
+                                },
+                            },
+                        )).len;
+                    }
+                }
+            }
+            // No more headers, now write the header terminator and move onto the body
+            self.state = .WriteBody;
+            return (try std.fmt.bufPrint(buf, "\r\n", .{})).len;
+        }
+
+        fn updateWriteBody(self: *Self) !usize {
+            if (self.body_buf) |body_buf| {
+                const remain = body_buf[self.body_written..];
+                const sentlen = try self.parent.write(remain); // error.WouldBlock will be caught from above
+                //log.debug("Sent {d}/{d}", .{ sentlen, remain.len });
+                self.body_written += sentlen;
+                if (self.body_written == body_buf.len) {
+                    self.state = .Done;
+                }
+            } else {
+                // We're done with this response. Do the next one!
+                self.state = .Done;
+            }
+            // Don't fill the accum buffer, we're sending directly
+            return 0;
+        }
     };
 }

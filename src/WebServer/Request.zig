@@ -25,6 +25,10 @@ pub fn Request(comptime Parent: type) type {
             Done,
         } = .ReadCommand,
 
+        pub fn isDone(self: *const Self) bool {
+            return self.state == .Done;
+        }
+
         pub fn parseLine(self: *Self, line: []const u8) !bool {
             // TODO! --GM
             log.debug("In Line: {d} <<{s}>>", .{ line.len, line });
@@ -63,13 +67,13 @@ pub fn Request(comptime Parent: type) type {
                         return error.InvalidHttpCommandFormat;
                     }
                 },
+
                 .ReadHeaders => {
                     // name: value
                     if (line.len == 0) {
                         // End of headers
                         // TODO: See if we want to handle POST --GM
                         log.debug("End of headers", .{});
-                        try self.parent.prepareResponse();
                         self.state = .Done;
                         return false;
                     } else if (std.mem.indexOfPos(u8, line, 0, ": ")) |pos0| {
@@ -81,7 +85,11 @@ pub fn Request(comptime Parent: type) type {
                         return error.InvalidHttpHeaderFormat;
                     }
                 },
-                else => unreachable,
+
+                .Done => {
+                    // TODO: Consider handling pipelined sends and all that crap --GM
+                    return false;
+                },
             }
         }
 

@@ -23,12 +23,6 @@ pub fn ClientState(comptime Parent: type) type {
         request: ?Request = null,
         response: ?Response = null,
 
-        state: enum(u8) {
-            Read,
-            Write,
-            Unconnected,
-        } = .Unconnected,
-
         /// Initialises the client state, except for the previous and next indices.
         pub fn init(self: *Self, sockfd: os.fd_t, addr: *os.sockaddr.in6) void {
             self.sockfd = sockfd;
@@ -52,146 +46,81 @@ pub fn ClientState(comptime Parent: type) type {
 
         fn initNextRequest(self: *Self) void {
             log.debug("Prepping next request", .{});
-            self.state = .Read;
             self.accum_buf_used = 0;
             self.request = Request{ .parent = self };
             self.response = null;
         }
 
-        pub fn expectedPollEvents(self: *Self) @TypeOf(@intToPtr(*allowzero os.pollfd, 0).events) {
-            return switch (self.state) {
-                .Read => os.POLL.IN,
-                .Write => os.POLL.OUT,
-                else => 0,
-            };
-        }
-
-        pub fn update(self: *Self) !void {
-            switch (self.state) {
-                .Read => {
-                    while (try self.updateRecv(self.accum_buf[self.accum_buf_used..])) |ncount| {
-                        //const indata = self.accum_buf[self.accum_buf_used..][0..ncount];
-                        //log.debug("Recv: {d} <<{s}>>", .{ indata.len, indata });
-                        self.accum_buf_used += ncount;
-                        try self.updateRecvSplitLines();
-                    }
-                    if (self.request.?.state == .Done) {
-                        // Cut the accum buf short
-                        self.accum_buf_sent = 0;
-                        self.accum_buf_used = 0;
-                        // Write our response
-                        self.state = .Write;
-                    }
-                },
-
-                .Write => {
-                    while (true) {
-                        if (self.accum_buf_sent < self.accum_buf_used) {
-                            const sentlen = os.send(
-                                self.sockfd,
-                                self.accum_buf[self.accum_buf_sent..self.accum_buf_used],
-                                os.MSG.DONTWAIT,
-                            ) catch |err| switch (err) {
-                                error.WouldBlock => return, // Skip if we're unable to send.
-                                else => return err,
-                            };
-                            //const sent = self.accum_buf[self.accum_buf_sent..][0..sentlen];
-                            //log.debug("Send: {d} <<{s}>>", .{ sentlen, sent });
-                            self.accum_buf_sent += sentlen;
-                        } else if (self.response.?.state == .WriteFlushClose) {
-                            switch (self.response.?.headers.Connection.?) {
-                                .close => {
-                                    self.deinit();
-                                },
-                                .@"keep-alive", .@"Keep-Alive" => {
-                                    self.initNextRequest();
-                                },
-                            }
-                            return;
-                        } else {
-                            self.accum_buf_sent = 0;
-                            self.accum_buf_used = 0;
-                            self.accum_buf_used += switch (self.response.?.state) {
-                                .WriteCommand => try self.updateWriteCommand(self.accum_buf[self.accum_buf_used..]),
-                                .WriteHeaders => try self.updateWriteHeaders(self.accum_buf[self.accum_buf_used..]),
-                                .WriteBody => self.updateWriteBody() catch |err| switch (err) {
-                                    error.WouldBlock => return, // Skip if we're unable to send.
-                                    else => return err,
-                                },
-                                else => unreachable,
-                            };
-                        }
-                    }
-                },
-                else => {},
+        const ipollevents = @TypeOf(@intToPtr(*allowzero os.pollfd, 0).events);
+        pub fn expectedPollEvents(self: *Self) ipollevents {
+            var result: ipollevents = 0;
+            if (self.request != null) {
+                result |= os.POLL.IN;
             }
-        }
-
-        fn updateWriteCommand(self: *Self, buf: []u8) !usize {
-            const response = &(self.response.?);
-            const status = response.status;
-            const result = (try std.fmt.bufPrint(
-                buf,
-                "HTTP/1.1 {d} {s}\r\n",
-                .{ @enumToInt(status), status.phrase() orelse "???" },
-            )).len;
-            response.state = .WriteHeaders;
+            if (self.response != null) {
+                result |= os.POLL.OUT;
+            }
             return result;
         }
 
-        fn updateWriteHeaders(self: *Self, buf: []u8) !usize {
-            const response = &(self.response.?);
-            const headers = &(response.headers);
-            inline for (@typeInfo(@TypeOf(headers.*)).Struct.fields, 0..) |field, i| {
-                if (i >= response.header_idx) {
-                    if (@field(headers.*, field.name)) |value| {
-                        response.header_idx = i + 1;
-                        return (try std.fmt.bufPrint(
-                            buf,
-                            switch (field.type) {
-                                []const u8, []u8, ?[]const u8, ?[]u8 => "{s}: {s}\r\n",
-                                else => switch (@typeInfo(field.type)) {
-                                    .Enum => "{s}: {s}\r\n",
-                                    else => "{s}: {any}\r\n",
-                                },
+        pub fn update(self: *Self) !void {
+            if (self.request) |*request| {
+                // TODO: Handle request parsing while response is active --GM
+                if (self.response != null) @panic("conflict with accum_buf with request and response both active!");
+                requestLoop: while (try self.updateRecv(self.accum_buf[self.accum_buf_used..])) |ncount| {
+                    //const indata = self.accum_buf[self.accum_buf_used..][0..ncount];
+                    //log.debug("Recv: {d} <<{s}>>", .{ indata.len, indata });
+                    self.accum_buf_used += ncount;
+                    try self.updateRecvSplitLines();
+                    if (request.isDone()) break :requestLoop;
+                }
+                if (request.isDone()) {
+                    try self.prepareResponse();
+                }
+            }
+
+            if (self.response) |*response| {
+                responseLoop: while (true) {
+                    if (self.accum_buf_sent < self.accum_buf_used) {
+                        const sentlen = self.write(
+                            self.accum_buf[self.accum_buf_sent..self.accum_buf_used],
+                        ) catch |err| switch (err) {
+                            error.WouldBlock => break :responseLoop, // Skip if we're unable to send.
+                            else => return err,
+                        };
+                        self.accum_buf_sent += sentlen;
+                    } else if (response.isDone()) {
+                        switch (response.headers.Connection.?) {
+                            .close => {
+                                self.deinit();
                             },
-                            .{
-                                field.name, switch (@typeInfo(field.type)) {
-                                    .Enum => |eti| switch (value) {
-                                        inline eti.fields => |efield| efield.name,
-                                    },
-                                    else => value,
-                                },
+                            .@"keep-alive", .@"Keep-Alive" => {
+                                self.initNextRequest();
                             },
-                        )).len;
+                        }
+                        self.response = null;
+                        break :responseLoop;
+                    } else {
+                        self.accum_buf_sent = 0;
+                        self.accum_buf_used = 0;
+                        self.accum_buf_used += response.updateWrite(
+                            self.accum_buf[self.accum_buf_used..],
+                        ) catch |err| switch (err) {
+                            error.WouldBlock => break :responseLoop, // Skip if we're unable to send.
+                            else => return err,
+                        };
                     }
                 }
             }
-            // No more headers, now write the header terminator and move onto the body
-            response.state = .WriteBody;
-            return (try std.fmt.bufPrint(buf, "\r\n", .{})).len;
         }
 
-        fn updateWriteBody(self: *Self) !usize {
-            const response = &(self.response.?);
-            if (response.body_buf) |body_buf| {
-                const remain = body_buf[response.body_written..];
-                const sentlen = try os.send(
-                    self.sockfd,
-                    remain,
-                    os.MSG.DONTWAIT,
-                ); // error.WouldBlock will be caught from above
-                //log.debug("Sent {d}/{d}", .{ sentlen, remain.len });
-                response.body_written += sentlen;
-                if (response.body_written == body_buf.len) {
-                    response.state = .WriteFlushClose;
-                }
-            } else {
-                // We're done with this respons with this response. Do the next one!
-                response.state = .WriteFlushClose;
-            }
-            // Don't fill the accum buffer, we're sending directly
-            return 0;
+        pub fn write(self: *Self, buf: []const u8) !usize {
+            const sentlen = try os.send(
+                self.sockfd,
+                buf,
+                os.MSG.DONTWAIT,
+            );
+            return sentlen;
         }
 
         fn updateRecv(self: *Self, buf: []u8) !?usize {
@@ -229,12 +158,13 @@ pub fn ClientState(comptime Parent: type) type {
             }
         }
 
-        pub fn prepareResponse(self: *Self) !void {
+        fn prepareResponse(self: *Self) !void {
             var response = try self.parent.?.handleRequest(self, &self.request.?);
             response.headers.@"Content-Length" = if (response.body_buf) |body_buf|
                 body_buf.len
             else
                 0;
+            self.request = null;
             self.response = response;
         }
 
