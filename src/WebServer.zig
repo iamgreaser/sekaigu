@@ -10,6 +10,9 @@ pub const POLL_TIMEOUT_MSEC = 200; // How often do we ensure that we wake this t
 pub const MAX_CLIENTS = 128;
 pub const CONN_BACKLOG = 10;
 
+const static_pool = @import("static_pool.zig");
+const StaticPool = static_pool.StaticPool;
+
 // std.http.Server simply does not cut it for our purposes:
 // - It's strictly blocking, unless you use async, which has been temporarily removed
 // - You could use a thread... for every request
@@ -29,10 +32,11 @@ const Response = ClientState.Response;
 
 pub const WebServer = struct {
     const Self = @This();
+    const ClientPool = StaticPool(ClientState);
+
     server_sockfd: os.socket_t = -1,
-    clients: [MAX_CLIENTS]ClientState = [1]ClientState{ClientState{}} ** MAX_CLIENTS,
-    first_free_client: ?*ClientState = null,
-    first_used_client: ?*ClientState = null,
+    clients_backing: [MAX_CLIENTS]ClientPool.ChainedItem = [1]ClientPool.ChainedItem{ClientPool.ChainedItem{}} ** MAX_CLIENTS,
+    clients: ClientPool = ClientPool{},
     thread: ?std.Thread = null,
     thread_shutdown: std.Thread.ResetEvent = .{},
     poll_list: [1 + MAX_CLIENTS]os.pollfd = undefined,
@@ -102,12 +106,7 @@ pub const WebServer = struct {
             .server_sockfd = server_sockfd,
         };
         // Create free chain
-        self.first_free_client = &self.clients[0];
-        for (&self.clients, 0..) |*client, i| {
-            client.parent = self;
-            client.prev = if (i == 0) null else &self.clients[i - 1];
-            client.next = if (i == MAX_CLIENTS - 1) null else &self.clients[i + 1];
-        }
+        self.clients.init(&self.clients_backing);
         // Create thread
         self.thread_shutdown.reset();
         self.thread = try std.Thread.spawn(
@@ -129,9 +128,8 @@ pub const WebServer = struct {
         }
 
         log.info("Stopping clients", .{});
-        while (self.first_used_client) |client| {
-            client.deinit();
-        }
+        self.clients.deinit();
+
         if (self.server_sockfd >= 0) {
             log.info("Closing socket", .{});
             os.closeSocket(self.server_sockfd);
@@ -162,9 +160,8 @@ pub const WebServer = struct {
         self.poll_clients[0] = null;
 
         {
-            var client_chain: ?*ClientState = self.first_used_client;
-            while (client_chain) |client| {
-                client_chain = client.next;
+            var client_iter = self.clients.iterUsed();
+            while (client_iter.next()) |client| {
                 self.poll_list[poll_count] = os.pollfd{
                     .fd = client.sockfd,
                     .events = client.expectedPollEvents(),
@@ -195,9 +192,11 @@ pub const WebServer = struct {
                     if (sock_addr.family != os.AF.INET6) {
                         return error.UnexpectedSocketFamilyOnAccept;
                     }
-                    if (self.first_free_client) |client| {
-                        client.init(client_sockfd, &sock_addr);
-                    } else {
+                    if (try self.clients.tryAcquire(.{
+                        .parent = self,
+                        .sockfd = client_sockfd,
+                        .addr = &sock_addr,
+                    }) == null) {
                         return error.TooManyClients;
                     }
                     log.info("Client connected", .{});

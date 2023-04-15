@@ -12,9 +12,12 @@ pub fn ClientState(comptime Parent: type) type {
         const Self = @This();
         pub const Request = @import("Request.zig").Request(Self);
         pub const Response = @import("Response.zig").Response(Self);
+        pub const InitOptions = struct {
+            parent: *Parent,
+            sockfd: os.fd_t,
+            addr: *const os.sockaddr.in6,
+        };
         parent: ?*Parent = null,
-        prev: ?*Self = null,
-        next: ?*Self = null,
         sockfd: os.fd_t = 0,
         addr: os.sockaddr.in6 = undefined,
         accum_buf: [CLIENT_BUF_SIZE]u8 = undefined,
@@ -23,12 +26,12 @@ pub fn ClientState(comptime Parent: type) type {
         request: ?Request = null,
         response: ?Response = null,
 
-        /// Initialises the client state, except for the previous and next indices.
-        pub fn init(self: *Self, sockfd: os.fd_t, addr: *os.sockaddr.in6) void {
-            self.sockfd = sockfd;
-            self.addr = addr.*;
+        /// Initialises the client state.
+        pub fn init(self: *Self, options: InitOptions) !void {
+            self.parent = options.parent;
+            self.sockfd = options.sockfd;
+            self.addr = options.addr.*;
             self.initNextRequest();
-            self.moveRing(&self.parent.?.first_free_client, &self.parent.?.first_used_client);
         }
 
         /// Deinitialises and disowns the client state.
@@ -37,7 +40,6 @@ pub fn ClientState(comptime Parent: type) type {
             if (self.sockfd != 0) {
                 os.closeSocket(self.sockfd);
                 self.sockfd = 0;
-                self.moveRing(&self.parent.?.first_used_client, &self.parent.?.first_free_client);
             }
             self.request = null;
             self.response = null;
@@ -166,27 +168,6 @@ pub fn ClientState(comptime Parent: type) type {
                 0;
             self.request = null;
             self.response = response;
-        }
-
-        /// Moves this client from one ring to another.
-        fn moveRing(self: *Self, from_root: *?*Self, to_root: *?*Self) void {
-            // Detach from current ring
-            if (self.next) |next| {
-                next.prev = self.prev;
-            }
-            if (self.prev) |prev| {
-                prev.next = self.next;
-            } else {
-                from_root.* = self.next;
-            }
-
-            // Prepend to new ring
-            self.prev = null;
-            self.next = to_root.*;
-            if (to_root.*) |first| {
-                first.prev = self;
-            }
-            to_root.* = self;
         }
     };
 }
