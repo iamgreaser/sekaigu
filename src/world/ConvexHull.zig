@@ -10,7 +10,7 @@ const Mat2f = linalg.Mat2f;
 const Mat3f = linalg.Mat3f;
 const Mat4f = linalg.Mat4f;
 const va_types = @import("va_types.zig");
-const IdxType = @import("IdxType.zig").IdxType;
+const IdxType = @import("../IdxType.zig").IdxType;
 const VA_P4HF_T2F_C3F_N3F = va_types.VA_P4HF_T2F_C3F_N3F;
 
 pub const Point = @import("Point.zig").Point(ConvexHull, "points");

@@ -43,6 +43,11 @@ const Mat4f = linalg.Mat4f;
 const world = @import("world.zig");
 const ConvexHull = world.ConvexHull;
 
+const session_module = @import("session.zig");
+const Session = session_module.Session;
+const Player = session_module.Player;
+const LocalPlayer = session_module.LocalPlayer;
+
 const font_renderer = @import("font_renderer.zig");
 const gfxstate = @import("gfxstate.zig");
 const Model = gfxstate.Model;
@@ -251,6 +256,8 @@ var test_tex: gl.Texture2D = gl.Texture2D.Dummy;
 var gfx: GfxContext = undefined;
 var webserver: WebServer = undefined;
 
+var session: ?Session = null;
+
 var timer: if (TIMERS_EXIST) time.Timer else @TypeOf(DUMMY_TIMER) = undefined;
 var time_accum: u64 = 0;
 var frame_time_accum: i64 = 0;
@@ -265,6 +272,27 @@ pub fn init() !void {
     // Initialise the font renderer
     try font_renderer.init(main_allocator);
     errdefer font_renderer.free();
+
+    // Create a session and player
+    errdefer ({
+        if (session) |*s| {
+            s.deinit();
+            session = null;
+        }
+    });
+    session = undefined;
+    try session.?.init(.{
+        .allocator = main_allocator,
+    });
+    local_player = try session.?.addPlayer(.{
+        .player_type = .{
+            .Local = &local_player_backing,
+        },
+    });
+    errdefer ({
+        session.?.removePlayer(local_player.?);
+        local_player = null;
+    });
 
     // Create a web server
     try webserver.init();
@@ -341,6 +369,16 @@ pub fn init() !void {
 
 pub fn destroy() void {
     webserver.deinit();
+    if (session) |*s| {
+        if (local_player) |*p| {
+            s.removePlayer(p.*);
+        }
+        s.deinit();
+        session = null;
+    }
+    if (local_player != null) {
+        local_player = null;
+    }
     gfx.free();
 }
 
@@ -363,10 +401,8 @@ pub fn main() !void {
 }
 
 var model_zrot: f32 = 0.0;
-var cam_rot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 });
-var cam_pos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 });
-var cam_drot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 0.0 });
-var cam_dpos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 0.0 });
+var local_player_backing: LocalPlayer = .{};
+var local_player: ?*Player = null;
 var keys: struct {
     w: bool = false,
     a: bool = false,
@@ -382,7 +418,8 @@ var keys: struct {
 
 pub fn tickScene(dt: f32) !void {
     model_zrot = @mod(model_zrot + 3.141593 * 2.0 / 5.0 * dt, 3.141593 * 2.0);
-    cam_dpos = Vec4f.new(.{
+    const p: *Player = local_player.?;
+    p.cam_dpos = Vec4f.new(.{
         if (keys.d) @as(f32, 1.0) else @as(f32, 0.0),
         if (keys.SPACE) @as(f32, 1.0) else @as(f32, 0.0),
         if (keys.s) @as(f32, 1.0) else @as(f32, 0.0),
@@ -393,7 +430,7 @@ pub fn tickScene(dt: f32) !void {
         if (keys.w) @as(f32, 1.0) else @as(f32, 0.0),
         0.0,
     })).mul(5.0);
-    cam_drot = Vec4f.new(.{
+    p.cam_drot = Vec4f.new(.{
         if (keys.DOWN) @as(f32, 1.0) else @as(f32, 0.0),
         if (keys.RIGHT) @as(f32, 1.0) else @as(f32, 0.0),
         0.0,
@@ -407,11 +444,11 @@ pub fn tickScene(dt: f32) !void {
 
     // TODO: Have a matrix invert function --GM
     const icam = Mat4f.I
-        .translate(cam_pos.a[0], cam_pos.a[1], cam_pos.a[2])
-        .rotate(-cam_rot.a[1], 0.0, 1.0, 0.0)
-        .rotate(-cam_rot.a[0], 1.0, 0.0, 0.0);
-    cam_pos = cam_pos.add(icam.mul(cam_dpos.mul(dt)));
-    cam_rot = cam_rot.add(cam_drot.mul(dt));
+        .translate(p.cam_pos.a[0], p.cam_pos.a[1], p.cam_pos.a[2])
+        .rotate(-p.cam_rot.a[1], 0.0, 1.0, 0.0)
+        .rotate(-p.cam_rot.a[0], 1.0, 0.0, 0.0);
+    p.cam_pos = p.cam_pos.add(icam.mul(p.cam_dpos.mul(dt)));
+    p.cam_rot = p.cam_rot.add(p.cam_drot.mul(dt));
 }
 
 pub fn drawScene() !void {
@@ -423,12 +460,13 @@ pub fn drawScene() !void {
     );
     try gl.clearColor(0.2, 0.0, 0.4, 0.0);
     try gl.clear(.{ .color = true, .depth = true });
-    gfxstate.shader_uniforms.cam_pos = cam_pos;
+    const p: *const Player = local_player.?;
+    gfxstate.shader_uniforms.cam_pos = p.cam_pos;
     gfxstate.shader_uniforms.mcam = Mat4f.I
-        .rotate(cam_rot.a[0], 1.0, 0.0, 0.0)
-        .rotate(cam_rot.a[1], 0.0, 1.0, 0.0)
-        .translate(-cam_pos.a[0], -cam_pos.a[1], -cam_pos.a[2]);
-    gfxstate.shader_uniforms.light = cam_pos;
+        .rotate(p.cam_rot.a[0], 1.0, 0.0, 0.0)
+        .rotate(p.cam_rot.a[1], 0.0, 1.0, 0.0)
+        .translate(-p.cam_pos.a[0], -p.cam_pos.a[1], -p.cam_pos.a[2]);
+    gfxstate.shader_uniforms.light = p.cam_pos;
     {
         const had_DepthTest = try gl.isEnabled(.DepthTest);
         const had_CullFace = try gl.isEnabled(.CullFace);

@@ -5,7 +5,7 @@ const Vec4f = linalg.Vec4f;
 const Mat2f = linalg.Mat2f;
 const Mat3f = linalg.Mat3f;
 const Mat4f = linalg.Mat4f;
-const IdxType = @import("IdxType.zig").IdxType;
+const IdxType = @import("../IdxType.zig").IdxType;
 
 pub fn Face(comptime Parent: type, comptime parent_field: []const u8) type {
     return struct {

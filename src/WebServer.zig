@@ -28,7 +28,7 @@ const StaticPool = static_pool.StaticPool;
 // TODO: Windows support - that is, we're likely to need select() instead of poll()... but not sure why select() isn't defined in os.linux? --GM
 //
 const http_types = @import("WebServer/http_types.zig");
-const ClientState = @import("WebServer/ClientState.zig").ClientState(WebServer);
+pub const ClientState = @import("WebServer/ClientState.zig").ClientState(WebServer);
 const Request = ClientState.Request;
 const Response = ClientState.Response;
 const ChainedRequest = ClientState.ChainedRequest;
