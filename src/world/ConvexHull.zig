@@ -228,6 +228,29 @@ pub const ConvexHull = struct {
         return false;
     }
 
+    fn genPoint(self: *Self, pos: Vec4f, norm: Vec3f) !void {
+        // w1 = finite, w0 = infinite
+        const normalw1 = norm;
+        const normalw0 = Vec3f.new(.{ 0, 0, 0 });
+        const colorw1 = Vec3f.new(.{ 1.0, 1.0, 1.0 }); // TODO! --GM
+        const colorw0 = Vec3f.new(.{ 0, 0, 0 });
+        const tex0 = Vec2f.new(.{ pos.a[0], pos.a[2] });
+        (try self.meshpoints.addOne()).* = if (pos.a[3] == 1.0)
+            VA_P4HF_T2F_C3F_N3F{
+                .pos = pos.a,
+                .color = colorw1.a,
+                .normal = normalw1.a,
+                .tex0 = tex0.a,
+            }
+        else
+            VA_P4HF_T2F_C3F_N3F{
+                .pos = pos.a,
+                .color = colorw0.a,
+                .normal = normalw0.a,
+                .tex0 = tex0.a,
+            };
+    }
+
     pub fn buildEdgesAndPoints(self: *Self) !void {
         // Clear most lists
         self.edges.clearAndFree();
@@ -298,12 +321,7 @@ pub const ConvexHull = struct {
 
             const f0 = face0.ptr();
             const firstmp = self.meshpoints.items.len;
-
-            // w1 = finite, w0 = infinite
-            const normalw1 = f0.norm;
-            const normalw0 = Vec3f.new(.{ 0, 0, 0 });
-            const colorw1 = Vec3f.new(.{ 1.0, 1.0, 1.0 }); // TODO! --GM
-            const colorw0 = Vec3f.new(.{ 0, 0, 0 });
+            const norm = f0.norm;
 
             if (edgecount == 0) {
                 // 0 edges
@@ -313,16 +331,7 @@ pub const ConvexHull = struct {
                 // Otherwise we can get a 3-infinite point and that's... bad.
 
                 // Refpoint
-                {
-                    const posw1 = f0.norm.mul(-f0.offs).homogenize(1.0);
-                    const tex0w1 = Vec2f.new(.{ posw1.a[0], posw1.a[2] });
-                    (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
-                        .pos = posw1.a,
-                        .color = colorw1.a,
-                        .normal = normalw1.a,
-                        .tex0 = tex0w1.a,
-                    };
-                }
+                try self.genPoint(f0.norm.mul(-f0.offs).homogenize(1.0), norm);
 
                 // Now we need to make some cross product based on which edge is most major.
                 const xlen = @fabs(f0.norm.a[0]);
@@ -351,52 +360,13 @@ pub const ConvexHull = struct {
                 }
 
                 // -S0
-                {
-                    const posw0 = sidedir0.mul(-1.0).homogenize(0.0);
-                    const tex0w0 = Vec2f.new(.{ posw0.a[0], posw0.a[2] });
-                    (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
-                        .pos = posw0.a,
-                        .color = colorw0.a,
-                        .normal = normalw0.a,
-                        .tex0 = tex0w0.a,
-                    };
-                }
-
+                try self.genPoint(sidedir0.mul(-1.0).homogenize(0.0), norm);
                 // -S1
-                {
-                    const posw0 = sidedir1.mul(-1.0).homogenize(0.0);
-                    const tex0w0 = Vec2f.new(.{ posw0.a[0], posw0.a[2] });
-                    (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
-                        .pos = posw0.a,
-                        .color = colorw0.a,
-                        .normal = normalw0.a,
-                        .tex0 = tex0w0.a,
-                    };
-                }
-
+                try self.genPoint(sidedir1.mul(-1.0).homogenize(0.0), norm);
                 // +S0
-                {
-                    const posw0 = sidedir0.homogenize(0.0);
-                    const tex0w0 = Vec2f.new(.{ posw0.a[0], posw0.a[2] });
-                    (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
-                        .pos = posw0.a,
-                        .color = colorw0.a,
-                        .normal = normalw0.a,
-                        .tex0 = tex0w0.a,
-                    };
-                }
-
+                try self.genPoint(sidedir0.homogenize(0.0), norm);
                 // +S1
-                {
-                    const posw0 = sidedir1.homogenize(0.0);
-                    const tex0w0 = Vec2f.new(.{ posw0.a[0], posw0.a[2] });
-                    (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
-                        .pos = posw0.a,
-                        .color = colorw0.a,
-                        .normal = normalw0.a,
-                        .tex0 = tex0w0.a,
-                    };
-                }
+                try self.genPoint(sidedir1.homogenize(0.0), norm);
             } else if (edgecount == 1 or (edgecount == 2 and self.edges.items[firstedge].limitneg == null and self.edges.items[firstedge].limitpos == null)) {
                 // 1 or 2 infinite edges
                 const e0 = self.edges.items[firstedge];
@@ -407,28 +377,9 @@ pub const ConvexHull = struct {
                 // Otherwise we can get a 3-infinite point and that's... bad.
 
                 // Refpoint
-                {
-                    const posw1 = e0.refpoint.homogenize(1.0);
-                    const tex0w1 = Vec2f.new(.{ posw1.a[0], posw1.a[2] });
-                    (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
-                        .pos = posw1.a,
-                        .color = colorw1.a,
-                        .normal = normalw1.a,
-                        .tex0 = tex0w1.a,
-                    };
-                }
-
+                try self.genPoint(e0.refpoint.homogenize(1.0), norm);
                 // Positive
-                {
-                    const posw0 = e0.dir.homogenize(0.0);
-                    const tex0w0 = Vec2f.new(.{ posw0.a[0], posw0.a[2] });
-                    (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
-                        .pos = posw0.a,
-                        .color = colorw0.a,
-                        .normal = normalw0.a,
-                        .tex0 = tex0w0.a,
-                    };
-                }
+                try self.genPoint(e0.dir.homogenize(0.0), norm);
 
                 // Side
                 if (edgecount == 2) {
@@ -436,41 +387,12 @@ pub const ConvexHull = struct {
                     if (!(e1.limitneg == null and e1.limitpos == null)) @panic("Invalid special case!");
 
                     // Side Negative
-                    {
-                        const posw0 = e1.dir.mul(-1.0).homogenize(0.0);
-                        const tex0w0 = Vec2f.new(.{ posw0.a[0], posw0.a[2] });
-                        (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
-                            .pos = posw0.a,
-                            .color = colorw0.a,
-                            .normal = normalw0.a,
-                            .tex0 = tex0w0.a,
-                        };
-                    }
-
+                    try self.genPoint(e1.dir.mul(-1.0).homogenize(0.0), norm);
                     // Side Refpoint
                     // NOTE: This is actually required!
-                    {
-                        const posw1 = e1.refpoint.homogenize(1.0);
-                        const tex0w1 = Vec2f.new(.{ posw1.a[0], posw1.a[2] });
-                        (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
-                            .pos = posw1.a,
-                            .color = colorw1.a,
-                            .normal = normalw1.a,
-                            .tex0 = tex0w1.a,
-                        };
-                    }
-
+                    try self.genPoint(e1.refpoint.homogenize(1.0), norm);
                     // Side Positive
-                    {
-                        const posw0 = e1.dir.homogenize(0.0);
-                        const tex0w0 = Vec2f.new(.{ posw0.a[0], posw0.a[2] });
-                        (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
-                            .pos = posw0.a,
-                            .color = colorw0.a,
-                            .normal = normalw0.a,
-                            .tex0 = tex0w0.a,
-                        };
-                    }
+                    try self.genPoint(e1.dir.homogenize(0.0), norm);
                 } else {
                     // Find other face
                     const f1 = if (face0.v == e0.face0.v)
@@ -484,29 +406,11 @@ pub const ConvexHull = struct {
                     const sidedir = f0.projectDir(f1.norm.mul(-1.0)).normalize();
 
                     // Side
-                    {
-                        const posw0 = sidedir.homogenize(0.0);
-                        const tex0w0 = Vec2f.new(.{ posw0.a[0], posw0.a[2] });
-                        (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
-                            .pos = posw0.a,
-                            .color = colorw0.a,
-                            .normal = normalw0.a,
-                            .tex0 = tex0w0.a,
-                        };
-                    }
+                    try self.genPoint(sidedir.homogenize(0.0), norm);
                 }
 
                 // Negative
-                {
-                    const posw0 = e0.dir.mul(-1.0).homogenize(0.0);
-                    const tex0w0 = Vec2f.new(.{ posw0.a[0], posw0.a[2] });
-                    (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
-                        .pos = posw0.a,
-                        .color = colorw0.a,
-                        .normal = normalw0.a,
-                        .tex0 = tex0w0.a,
-                    };
-                }
+                try self.genPoint(e0.dir.mul(-1.0).homogenize(0.0), norm);
             } else {
                 // Open strip or closed loop
                 // Add all points
@@ -517,37 +421,14 @@ pub const ConvexHull = struct {
                         // Add the negative point to the edge list
                         // TEST: Use x,z directly --GM
                         if (curedge.limitnegpoint) |lnpoint| {
-                            const posw1 = lnpoint.ptr().pos.homogenize(1.0);
-                            const tex0w1 = Vec2f.new(.{ posw1.a[0], posw1.a[2] });
-                            (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
-                                .pos = posw1.a,
-                                .color = colorw1.a,
-                                .normal = normalw1.a,
-                                .tex0 = tex0w1.a,
-                            };
+                            try self.genPoint(lnpoint.ptr().pos.homogenize(1.0), norm);
                         } else {
-                            const posw0 = curedge.dir.mul(-1.0).homogenize(0.0);
-                            const tex0w0 = Vec2f.new(.{ -curedge.dir.a[0], -curedge.dir.a[2] });
-                            (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
-                                .pos = posw0.a,
-                                .color = colorw0.a,
-                                .normal = normalw0.a,
-                                .tex0 = tex0w0.a,
-                            };
+                            try self.genPoint(curedge.dir.mul(-1.0).homogenize(0.0), norm);
                         }
 
                         // If we have a positive point, we add another point
                         if (curedge.limitpospoint == null) {
-                            //
-                            //const lnpoint = curedge.limitnegpoint orelse unreachable;
-                            const posw0 = curedge.dir.homogenize(0.0);
-                            const tex0w0 = Vec2f.new(.{ curedge.dir.a[0], curedge.dir.a[2] });
-                            (try self.meshpoints.addOne()).* = VA_P4HF_T2F_C3F_N3F{
-                                .pos = posw0.a,
-                                .color = colorw0.a,
-                                .normal = normalw0.a,
-                                .tex0 = tex0w0.a,
-                            };
+                            try self.genPoint(curedge.dir.homogenize(0.0), norm);
                         }
 
                         // Find the next edge
