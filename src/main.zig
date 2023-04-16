@@ -420,8 +420,6 @@ pub fn main() !void {
     }
 }
 
-var model_zrot: f32 = 0.0;
-var model_dzrot: f32 = 3.141593 * 2.0 / 5.0;
 var local_player_backing: LocalPlayer = .{};
 var local_player: ?*Player = null;
 var keys: struct {
@@ -448,15 +446,17 @@ pub fn tickScene(dt: f32) !void {
 }
 
 pub fn tickSceneReal(dt: f32) !void {
-    model_zrot = @mod(model_zrot + model_dzrot * dt, 3.141593 * 2.0);
+    const state = session.?.getPredictedState(dt);
+    try session.?.handleEvent(Session.Events.SetZRot, .{state.model_zrot});
+
     const p: *Player = local_player.?;
     try tickPlayer(dt, p);
 }
 
 fn tickPlayer(dt: f32, p: *Player) !void {
     const state = p.getPredictedState(dt);
-    try p.handleEvent(Player.Events.SetPos, .{state.cam_pos});
-    try p.handleEvent(Player.Events.SetRot, .{state.cam_rot});
+    try p.handleEvent(Player.Events.SetPos, .{state.pos});
+    try p.handleEvent(Player.Events.SetRot, .{state.rot});
 
     const dpos = Vec4f.new(.{
         if (keys.d) @as(f32, 1.0) else @as(f32, 0.0),
@@ -481,15 +481,15 @@ fn tickPlayer(dt: f32, p: *Player) !void {
         0.0,
     })).mul(3.141593); // 180 deg per second
 
-    if (!std.mem.eql(f32, &state.cam_dpos.a, &dpos.a))
+    if (!std.mem.eql(f32, &state.dpos.a, &dpos.a))
         try p.handleEvent(Player.Events.SetDPos, .{dpos});
-    if (!std.mem.eql(f32, &state.cam_drot.a, &drot.a))
+    if (!std.mem.eql(f32, &state.drot.a, &drot.a))
         try p.handleEvent(Player.Events.SetDRot, .{drot});
 }
 
 pub fn drawScene() !void {
     const dt = accum_tick_secs;
-    const captured_model_zrot = @mod(model_zrot + model_dzrot * dt, 3.141593 * 2.0);
+    const state = session.?.getPredictedState(dt);
 
     gfxstate.shader_uniforms.mproj = Mat4f.perspective(
         @intToFloat(f32, gfx.width),
@@ -502,12 +502,12 @@ pub fn drawScene() !void {
 
     {
         const p: Player.State = local_player.?.getPredictedState(dt);
-        gfxstate.shader_uniforms.cam_pos = p.cam_pos;
+        gfxstate.shader_uniforms.cam_pos = p.pos;
         gfxstate.shader_uniforms.mcam = Mat4f.I
-            .rotate(p.cam_rot.a[0], 1.0, 0.0, 0.0)
-            .rotate(p.cam_rot.a[1], 0.0, 1.0, 0.0)
-            .translate(-p.cam_pos.a[0], -p.cam_pos.a[1], -p.cam_pos.a[2]);
-        gfxstate.shader_uniforms.light = p.cam_pos;
+            .rotate(p.rot.a[0], 1.0, 0.0, 0.0)
+            .rotate(p.rot.a[1], 0.0, 1.0, 0.0)
+            .translate(-p.pos.a[0], -p.pos.a[1], -p.pos.a[2]);
+        gfxstate.shader_uniforms.light = p.pos;
     }
 
     {
@@ -523,8 +523,8 @@ pub fn drawScene() !void {
             defer gl.unuseProgram() catch {};
             gfxstate.shader_uniforms.mmodel = Mat4f.I
                 .translate(0.5, 0.0, -3.0)
-                .rotate(captured_model_zrot, 0.0, 1.0, 0.0)
-                .rotate(captured_model_zrot * 2.0, 0.0, 0.0, 1.0);
+                .rotate(state.model_zrot, 0.0, 1.0, 0.0)
+                .rotate(state.model_zrot * 2.0, 0.0, 0.0, 1.0);
             try shadermagic.loadUniforms(&shader_prog, @TypeOf(gfxstate.shader_uniforms), &gfxstate.shader_uniforms, &shader_prog_unicache);
             try model_base.draw(.Triangles);
         }
@@ -543,7 +543,7 @@ pub fn drawScene() !void {
             try gl.useProgram(textured_prog);
             defer gl.unuseProgram() catch {};
             gfxstate.shader_uniforms.mmodel = Mat4f.I
-                .translate(-5.0, -2.0, -10.0); //.rotate(-captured_model_zrot, 0.0, 1.0, 0.0);
+                .translate(-5.0, -2.0, -10.0); //.rotate(-state.model_zrot, 0.0, 1.0, 0.0);
             try shadermagic.loadUniforms(&textured_prog, @TypeOf(gfxstate.shader_uniforms), &gfxstate.shader_uniforms, &textured_prog_unicache);
             try model_pyramid.?.draw(.Triangles);
         }
@@ -594,10 +594,10 @@ pub fn drawScene() !void {
             while (iter.next()) |kv| {
                 const otherp: Player.State = kv.value_ptr.*.getPredictedState(dt);
                 gfxstate.shader_uniforms.mmodel = Mat4f.I
-                    .translate(otherp.cam_pos.a[0], otherp.cam_pos.a[1], otherp.cam_pos.a[2])
+                    .translate(otherp.pos.a[0], otherp.pos.a[1], otherp.pos.a[2])
                     .scale(0.1, 0.1, 0.1)
-                    .rotate(-otherp.cam_rot.a[1], 0.0, 1.0, 0.0)
-                    .rotate(-otherp.cam_rot.a[0], 1.0, 0.0, 0.0);
+                    .rotate(-otherp.rot.a[1], 0.0, 1.0, 0.0)
+                    .rotate(-otherp.rot.a[0], 1.0, 0.0, 0.0);
                 try shadermagic.loadUniforms(&shader_prog, @TypeOf(gfxstate.shader_uniforms), &gfxstate.shader_uniforms, &shader_prog_unicache);
                 try model_base.draw(.Triangles);
             }

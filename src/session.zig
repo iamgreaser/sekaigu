@@ -34,11 +34,11 @@ pub const Player = struct {
         player_type: PlayerType,
     };
     pub const State = struct {
-        pub const SCHEMA = .{ "cam_pos", "cam_rot", "cam_dpos", "cam_drot" };
-        cam_pos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 }),
-        cam_rot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 }),
-        cam_dpos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 0.0 }),
-        cam_drot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 0.0 }),
+        pub const SCHEMA = .{ "pos", "rot", "dpos", "drot" };
+        pos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 }),
+        rot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 }),
+        dpos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 0.0 }),
+        drot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 0.0 }),
     };
     pub const SCHEMA = .{ "id", "state" };
 
@@ -56,7 +56,7 @@ pub const Player = struct {
                 return EV{ .pos = pos };
             }
             pub fn apply(ev: *const EV, player: *Self) !void {
-                player.state.cam_pos = ev.pos;
+                player.state.pos = ev.pos;
             }
         };
         pub const SetRot = struct {
@@ -66,7 +66,7 @@ pub const Player = struct {
                 return EV{ .rot = rot };
             }
             pub fn apply(ev: *const EV, player: *Self) !void {
-                player.state.cam_rot = ev.rot;
+                player.state.rot = ev.rot;
             }
         };
         pub const SetDPos = struct {
@@ -76,7 +76,7 @@ pub const Player = struct {
                 return EV{ .dpos = dpos };
             }
             pub fn apply(ev: *const EV, player: *Self) !void {
-                player.state.cam_dpos = ev.dpos;
+                player.state.dpos = ev.dpos;
             }
         };
         pub const SetDRot = struct {
@@ -86,7 +86,7 @@ pub const Player = struct {
                 return EV{ .drot = drot };
             }
             pub fn apply(ev: *const EV, player: *Self) !void {
-                player.state.cam_drot = ev.drot;
+                player.state.drot = ev.drot;
             }
         };
     };
@@ -108,11 +108,11 @@ pub const Player = struct {
     pub fn getPredictedState(self: *const Self, dt: f32) State {
         var state = self.state;
         const icam = Mat4f.I
-            .translate(state.cam_pos.a[0], state.cam_pos.a[1], state.cam_pos.a[2])
-            .rotate(-state.cam_rot.a[1], 0.0, 1.0, 0.0)
-            .rotate(-state.cam_rot.a[0], 1.0, 0.0, 0.0);
-        state.cam_pos = state.cam_pos.add(icam.mul(state.cam_dpos.mul(dt)));
-        state.cam_rot = state.cam_rot.add(state.cam_drot.mul(dt));
+            .translate(state.pos.a[0], state.pos.a[1], state.pos.a[2])
+            .rotate(-state.rot.a[1], 0.0, 1.0, 0.0)
+            .rotate(-state.rot.a[0], 1.0, 0.0, 0.0);
+        state.pos = state.pos.add(icam.mul(state.dpos.mul(dt)));
+        state.rot = state.rot.add(state.drot.mul(dt));
         return state;
     }
 
@@ -135,10 +135,29 @@ pub const Session = struct {
     pub const InitOptions = struct {
         allocator: Allocator,
     };
-    pub const SCHEMA = .{"players"};
+    pub const State = struct {
+        pub const SCHEMA = .{ "model_zrot", "model_dzrot" };
+        model_zrot: f32 = 0.0,
+        model_dzrot: f32 = 3.141593 * 2.0 / 5.0,
+    };
+    pub const SCHEMA = .{ "state", "players" };
+
+    pub const Events = struct {
+        pub const SetZRot = struct {
+            const EV = @This();
+            rot: f32,
+            pub fn init(rot: f32) !EV {
+                return EV{ .rot = rot };
+            }
+            pub fn apply(ev: *const EV, session: *Self) !void {
+                session.state.model_zrot = ev.rot;
+            }
+        };
+    };
 
     players: AutoHashMap(Player.Id, *Player),
     player_ids_used: [MAX_PLAYERS]bool = [1]bool{false} ** MAX_PLAYERS,
+    state: State = .{},
 
     allocator: Allocator,
 
@@ -161,6 +180,21 @@ pub const Session = struct {
         }
         self.players.deinit();
         log.info("Session destroyed", .{});
+    }
+
+    pub fn getCurrentState(self: *const Self) State {
+        return self.state;
+    }
+
+    pub fn getPredictedState(self: *const Self, dt: f32) State {
+        var state = self.state;
+        state.model_zrot += state.model_dzrot * dt;
+        return state;
+    }
+
+    pub fn handleEvent(self: *Self, comptime TEvent: type, args: anytype) !void {
+        var ev: TEvent = try @call(.auto, TEvent.init, args);
+        try ev.apply(self);
     }
 
     fn allocPlayerId(self: *Self) !Player.Id {
