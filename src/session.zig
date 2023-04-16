@@ -34,15 +34,13 @@ pub const Player = struct {
         player_type: PlayerType,
     };
     pub const State = struct {
-        cam_rot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 }),
+        pub const SCHEMA = .{ "cam_pos", "cam_rot", "cam_dpos", "cam_drot" };
         cam_pos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 }),
-        cam_drot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 0.0 }),
+        cam_rot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 1.0 }),
         cam_dpos: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 0.0 }),
+        cam_drot: Vec4f = Vec4f.new(.{ 0.0, 0.0, 0.0, 0.0 }),
     };
-    pub const SCHEMA = struct {
-        id: Id,
-        state: State,
-    };
+    pub const SCHEMA = .{ "id", "state" };
 
     session: *Session,
     player_type: PlayerType,
@@ -137,10 +135,7 @@ pub const Session = struct {
     pub const InitOptions = struct {
         allocator: Allocator,
     };
-    pub const SCHEMA = struct {
-        // TODO FIXME Find out how to address players in the schema --GM
-        players: AutoHashMap(Player.Id, *Player),
-    };
+    pub const SCHEMA = .{"players"};
 
     players: AutoHashMap(Player.Id, *Player),
     player_ids_used: [MAX_PLAYERS]bool = [1]bool{false} ** MAX_PLAYERS,

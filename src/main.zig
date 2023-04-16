@@ -45,6 +45,8 @@ const Mat4f = linalg.Mat4f;
 const world = @import("world.zig");
 const ConvexHull = world.ConvexHull;
 
+const schema = @import("schema.zig");
+
 const session_module = @import("session.zig");
 const Session = session_module.Session;
 const Player = session_module.Player;
@@ -295,6 +297,22 @@ pub fn init() !void {
         session.?.removePlayer(local_player.?);
         local_player = null;
     });
+
+    // TEST: Save session
+    {
+        var albuf = std.ArrayList(u8).init(main_allocator);
+        defer albuf.deinit();
+        var writer = albuf.writer();
+        try schema.save(@TypeOf(writer), &writer, Session, &(session.?));
+        log.info("Saved session: {d} bytes", .{albuf.items.len});
+        var albuf2 = std.ArrayList(u8).init(main_allocator);
+        defer albuf2.deinit();
+        var writer2 = albuf2.writer();
+        for (albuf.items) |b| {
+            try writer2.print(" {X:0>2}", .{b});
+        }
+        log.debug("Session:{s}", .{albuf2.items});
+    }
 
     // Create a web server
     try webserver.init();

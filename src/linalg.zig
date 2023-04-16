@@ -4,6 +4,7 @@ const log = std.log.scoped(.linalg);
 pub fn Vec(comptime N: usize, comptime T: type) type {
     return struct {
         const Self = @This();
+        pub const SCHEMA = .{"a"};
         a: [N]T,
 
         pub fn new(data: [N]T) Self {
@@ -101,6 +102,7 @@ pub fn Vec(comptime N: usize, comptime T: type) type {
 fn Mat(comptime N: usize, comptime T: type) type {
     return struct {
         const Self = @This();
+        pub const SCHEMA = .{"a"};
         a: [N * N]T,
 
         fn buildIdentity() Self {
@@ -120,6 +122,7 @@ fn Mat(comptime N: usize, comptime T: type) type {
 pub const Mat4f = struct {
     // NOTE: ALL MATRICES APPEAR TRANSPOSED
     const Self = @This();
+    pub const SCHEMA = .{"a"};
     const N = 4;
     const T = f32;
     a: [N * N]T,
