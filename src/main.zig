@@ -261,6 +261,7 @@ var gfx: GfxContext = undefined;
 var webserver: WebServer = undefined;
 
 var session: ?Session = null;
+var saved_session_data: ?[]u8 = null;
 
 var timer: if (TIMERS_EXIST) time.Timer else @TypeOf(DUMMY_TIMER) = undefined;
 var time_accum: u64 = 0;
@@ -299,20 +300,8 @@ pub fn init() !void {
     });
 
     // TEST: Save session
-    {
-        var albuf = std.ArrayList(u8).init(main_allocator);
-        defer albuf.deinit();
-        var writer = albuf.writer();
-        try schema.save(@TypeOf(writer), &writer, Session, &(session.?));
-        log.info("Saved session: {d} bytes", .{albuf.items.len});
-        var albuf2 = std.ArrayList(u8).init(main_allocator);
-        defer albuf2.deinit();
-        var writer2 = albuf2.writer();
-        for (albuf.items) |b| {
-            try writer2.print(" {X:0>2}", .{b});
-        }
-        log.debug("Session:{s}", .{albuf2.items});
-    }
+    saved_session_data = try session.?.saveAlloc(main_allocator);
+    errdefer main_allocator.free(saved_session_data.?);
 
     // Create a web server
     try webserver.init();
@@ -389,6 +378,10 @@ pub fn init() !void {
 
 pub fn destroy() void {
     webserver.deinit();
+    if (saved_session_data) |*ss| {
+        main_allocator.free(ss.*);
+        saved_session_data = null;
+    }
     if (session) |*s| {
         if (local_player) |*p| {
             s.removePlayer(p.*);

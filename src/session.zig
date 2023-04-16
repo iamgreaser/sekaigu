@@ -12,6 +12,8 @@ const Mat2f = linalg.Mat2f;
 const Mat3f = linalg.Mat3f;
 const Mat4f = linalg.Mat4f;
 
+const schema = @import("schema.zig");
+
 const WebClientState = if (builtin.target.isWasm())
     struct {}
 else
@@ -180,6 +182,24 @@ pub const Session = struct {
         }
         self.players.deinit();
         log.info("Session destroyed", .{});
+    }
+
+    pub fn saveAlloc(self: *Self, allocator: Allocator) ![]u8 {
+        var albuf = std.ArrayList(u8).init(allocator);
+        defer albuf.deinit();
+        var writer = albuf.writer();
+        try schema.save(@TypeOf(writer), &writer, Self, self);
+        log.info("Saved session: {d} bytes", .{albuf.items.len});
+        var result = try albuf.toOwnedSlice();
+        errdefer allocator.free(result);
+        return result;
+    }
+
+    pub fn loadFromMemory(self: *Self, buf: []const u8) !void {
+        // TODO! --GM
+        _ = self;
+        _ = buf;
+        return error.TODO;
     }
 
     pub fn getCurrentState(self: *const Self) State {
