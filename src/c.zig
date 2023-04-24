@@ -74,9 +74,7 @@ pub usingnamespace if (builtin.target.isWasm()) struct {
         struct {}
     else
         @cImport({
-            //@cInclude("SDL.h");
             @cInclude("X11/Xlib.h");
-            //@cInclude("epoxy/gl.h");
         });
 
     pub usingnamespace if (builtin.target.os.tag == .windows)
@@ -85,6 +83,14 @@ pub usingnamespace if (builtin.target.isWasm()) struct {
         }
     else
         struct {
+            pub const everything = @cImport({
+                @cInclude("GL/glx.h");
+            });
+            pub const GLXContext = everything.GLXContext;
+            pub const GLXDrawable = everything.GLXDrawable;
+            pub const GLXFBConfig = everything.GLXFBConfig;
+            pub const GLXWindow = everything.GLXWindow;
+
             pub extern fn glXGetProcAddress(procName: [*:0]const u8) callconv(.C) ?*const fn () callconv(.C) void;
         };
 
