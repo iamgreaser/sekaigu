@@ -3,6 +3,8 @@ const log = std.log.scoped(.gfx_context);
 const C = @import("../c.zig");
 const gl = @import("../gl.zig");
 
+const mem = std.mem;
+
 const Self = @This();
 
 // from GLX 1.4
@@ -64,6 +66,12 @@ x11_window: ?C.Window = null,
 glx_context: C.GLXContext = null,
 glx_window: ?C.GLXWindow = null,
 
+atoms: struct {
+    UTF8_STRING: C.Atom,
+    _NET_WM_ICON_NAME: C.Atom,
+    _NET_WM_NAME: C.Atom,
+} = undefined,
+
 pub extern fn glXChooseFBConfig(
     dpy: *C.Display,
     screen: c_int,
@@ -123,6 +131,16 @@ pub fn init(self: *Self) anyerror!void {
     errdefer self.free();
     log.info("Initialising Xlib", .{});
     self.x11_display = try notNull(?*C.Display, C.XOpenDisplay(null));
+
+    log.info("Fetching X11 atoms", .{});
+    inline for (@typeInfo(@TypeOf(self.atoms)).Struct.fields) |field| {
+        comptime var name = field.name ++ "\x00";
+        @field(self.atoms, field.name) = try notNull(C.Atom, C.XInternAtom(
+            self.x11_display.?,
+            name,
+            C.True,
+        ));
+    }
 
     log.info("Creating window", .{});
     const root_window = try notNull(C.Window, C.XDefaultRootWindow(self.x11_display.?));
@@ -193,7 +211,8 @@ pub fn init(self: *Self) anyerror!void {
         self.glx_context.?,
     );
 
-    // TODO: Set window title (and icon?) --GM
+    // Set window title (TODO: and icon? --GM)
+    self.setTitle("sekaigu pre-alpha");
 
     log.info("Showing window", .{});
     _ = C.XMapRaised(self.x11_display.?, self.x11_window.?);
@@ -241,9 +260,12 @@ pub fn free(self: *Self) void {
 }
 
 pub fn setTitle(self: *Self, title: [:0]const u8) void {
-    //C.SDL_SetWindowTitle(self.window, title);
-    _ = self;
-    _ = title;
+    C.XSetTextProperty(self.x11_display.?, self.x11_window.?, &C.XTextProperty{
+        .value = @constCast(title),
+        .encoding = self.atoms.UTF8_STRING,
+        .format = 8,
+        .nitems = @intCast(c_ulong, mem.indexOfSentinel(u8, 0, title)),
+    }, self.atoms._NET_WM_NAME);
 }
 
 pub fn flip(self: *Self) void {

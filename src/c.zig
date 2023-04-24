@@ -75,6 +75,7 @@ pub usingnamespace if (builtin.target.isWasm()) struct {
     else
         @cImport({
             @cInclude("X11/Xlib.h");
+            @cInclude("X11/Xutil.h");
         });
 
     pub usingnamespace if (builtin.target.os.tag == .windows)
