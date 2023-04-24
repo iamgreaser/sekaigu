@@ -397,7 +397,59 @@ pub fn destroy() void {
     gfx.free();
 }
 
-pub fn main() !void {
+pub usingnamespace if (builtin.target.os.tag == .windows) struct {
+    //
+    // FIXME: Windows programs currently tend to outright crash when running the error handler.
+    //
+    // For example:
+    //     error: NotFound
+    //     thread 36 panic: reached unreachable code
+    //     Panicked during a panic. Aborting.
+    //
+    // We may need a better error handler.
+    //
+    pub fn main() void {
+        base_main() catch |termerr| {
+            log.err("Terminating with error: {!}", .{termerr});
+            fail: {
+                if (@errorReturnTrace()) |st| {
+                    log.err("Error return trace available: {d} / {d} ({any})", .{ st.index, st.instruction_addresses.len, st.instruction_addresses });
+                    var di = std.debug.getSelfDebugInfo() catch |err| {
+                        log.err("Failed to get debug info: {!}", .{err});
+                        break :fail;
+                    };
+                    addrs: for (st.instruction_addresses[0..st.index]) |addr| {
+                        log.err("Addr {X:0>16}", .{addr});
+                        // NOTE: The crash is in getModuleForAddress.
+                        if (false) {
+                            const module = di.getModuleForAddress(addr) catch |err| {
+                                log.err("Addr {X:0>16}, unknown module ({!})", .{ addr, err });
+                                continue :addrs;
+                            };
+                            const sym = module.getSymbolAtAddress(main_allocator, addr) catch |err| {
+                                log.err("Addr {X:0>16}, Module {X:0>16}, unknown symbol ({!})", .{ addr, module.base_address, err });
+                                continue :addrs;
+                            };
+                            const lineinfo = sym.line_info orelse {
+                                log.err("Addr {X:0>16}, Module {X:0>16}, Symbol {s}:{s}, at ???", .{ addr, module.base_address, sym.compile_unit_name, sym.symbol_name });
+                                continue :addrs;
+                            };
+                            log.err("Addr {X:0>16}, Module {X:0>16}, Symbol {s}:{s}, at {s}:{d}:{d}", .{ addr, module.base_address, sym.compile_unit_name, sym.symbol_name, lineinfo.file_name, lineinfo.line, lineinfo.column });
+                        }
+                    }
+                } else {
+                    log.err("No error return trace available", .{});
+                }
+            }
+        };
+    }
+} else struct {
+    pub fn main() !void {
+        try base_main();
+    }
+};
+
+pub fn base_main() !void {
     try init();
     defer destroy();
 
