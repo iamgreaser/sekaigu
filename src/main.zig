@@ -9,6 +9,8 @@ const TICKS_PER_SEC = 20;
 
 pub const main_allocator = if (builtin.target.isWasm())
     std.heap.wasm_allocator
+else if (builtin.target.os.tag == .windows)
+    std.heap.page_allocator
 else
     std.heap.c_allocator;
 

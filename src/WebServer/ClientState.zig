@@ -1,7 +1,12 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const log = std.log.scoped(.webserver_client);
 const os = std.os;
 const http = std.http;
+
+const parent_webserver = @import("../WebServer.zig");
+const POLLIN = parent_webserver.POLLIN;
+const POLLOUT = parent_webserver.POLLOUT;
 
 const static_pool = @import("../static_pool.zig");
 const StaticPoolChainedItem = static_pool.StaticPoolChainedItem;
@@ -17,11 +22,11 @@ pub fn ClientState(comptime Parent: type) type {
         pub const ChainedResponse = StaticPoolChainedItem(Response);
         pub const InitOptions = struct {
             parent: *Parent,
-            sockfd: os.fd_t,
+            sockfd: os.socket_t,
             addr: *const os.sockaddr.in6,
         };
         parent: *Parent,
-        sockfd: os.fd_t,
+        sockfd: ?os.socket_t,
         addr: os.sockaddr.in6,
         request: ?*ChainedRequest = null,
         response: ?*ChainedResponse = null,
@@ -39,9 +44,9 @@ pub fn ClientState(comptime Parent: type) type {
         /// Deinitialises and disowns the client state.
         pub fn deinit(self: *Self) void {
             log.debug("Deinitialising client", .{});
-            if (self.sockfd != 0) {
-                os.closeSocket(self.sockfd);
-                self.sockfd = 0;
+            if (self.sockfd) |sockfd| {
+                os.closeSocket(sockfd);
+                self.sockfd = null;
             }
             if (self.request) |request| {
                 self.parent.requests.release(request);
@@ -72,10 +77,10 @@ pub fn ClientState(comptime Parent: type) type {
         pub fn expectedPollEvents(self: *Self) ipollevents {
             var result: ipollevents = 0;
             if (self.request != null) {
-                result |= os.POLL.IN;
+                result |= POLLIN;
             }
             if (self.response != null) {
-                result |= os.POLL.OUT;
+                result |= POLLOUT;
             }
             return result;
         }
@@ -131,19 +136,21 @@ pub fn ClientState(comptime Parent: type) type {
         }
 
         pub fn read(self: *Self, buf: []u8) !usize {
-            const recvlen = os.recv(
-                self.sockfd,
+            // FIXME need to actually make the socket itself nonblocking as Win32 doesn't support MSG_DONTWAIT --GM
+            const recvlen = try os.recv(
+                self.sockfd.?,
                 buf,
-                os.MSG.DONTWAIT,
+                if (builtin.target.os.tag == .windows) 0 else os.MSG.DONTWAIT,
             );
             return recvlen;
         }
 
         pub fn write(self: *Self, buf: []const u8) !usize {
+            // FIXME need to actually make the socket itself nonblocking as Win32 doesn't support MSG_DONTWAIT --GM
             const sentlen = try os.send(
-                self.sockfd,
+                self.sockfd.?,
                 buf,
-                os.MSG.DONTWAIT,
+                if (builtin.target.os.tag == .windows) 0 else os.MSG.DONTWAIT,
             );
             return sentlen;
         }

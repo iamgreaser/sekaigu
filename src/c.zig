@@ -70,10 +70,24 @@ pub usingnamespace if (builtin.target.isWasm()) struct {
 
     //
 } else struct {
-    pub usingnamespace @cImport({
-        @cInclude("SDL.h");
-        //@cInclude("epoxy/gl.h");
-    });
+    pub usingnamespace if (builtin.target.os.tag == .windows)
+        struct {}
+    else
+        @cImport({
+            //@cInclude("SDL.h");
+            @cInclude("X11/Xlib.h");
+            //@cInclude("epoxy/gl.h");
+        });
+
+    pub usingnamespace if (builtin.target.os.tag == .windows)
+        struct {
+            pub extern fn wglGetProcAddress(unnamedParam1: [*:0]const u8) callconv(.C) ?*const fn () callconv(.C) void;
+        }
+    else
+        struct {
+            pub extern fn glXGetProcAddress(procName: [*:0]const u8) callconv(.C) ?*const fn () callconv(.C) void;
+        };
+
     pub usingnamespace @import("gl/consts.zig");
     pub usingnamespace @import("gl/apigen.zig").API;
 };

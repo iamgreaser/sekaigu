@@ -65,23 +65,6 @@ pub fn build(b: *Build) void {
 
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
-
-    // Creates a step for unit testing.
-    // FIXME: Doesn't seem to actually work --GM
-    if (!target.toTarget().isWasm()) {
-        const exe_tests = b.addTest(.{
-            .root_source_file = .{ .path = "src/main.zig" },
-            .target = target,
-            .optimize = optimize,
-        });
-        exe_tests.addIncludePath("/usr/include/SDL2");
-        exe_tests.linkSystemLibrary("c");
-        exe_tests.linkSystemLibrary("SDL2");
-        exe_tests.linkSystemLibrary("GL");
-
-        const test_step = b.step("test", "Run unit tests");
-        test_step.dependOn(&exe_tests.step);
-    }
 }
 
 pub fn buildTarget(b: *Build, target: std.zig.CrossTarget, optimize: std.builtin.Mode) *CompileStep {
@@ -108,48 +91,28 @@ pub fn buildTarget(b: *Build, target: std.zig.CrossTarget, optimize: std.builtin
         // GH issue #14818 sets .rdynamic. If we don't do that, we don't get our symbols in. --GM
         exe.rdynamic = true;
     }
-    switch (target.os_tag orelse .freestanding) {
+    switch (target.os_tag orelse builtin.target.os.tag) {
         .windows => {
-            // FIXME this doesn't link, instead throwing an unsearchable error:
-            //     error: lld-link: ___stack_chk_fail was replaced
-            // --GM
-
-            // TODO: Update for a direct OpenGL binding which doesn't touch libepoxy --GM
-
-            // Libraries to grab:
-            // - SDL2 - MinGW development version
-            exe.addIncludePath("./wlibs/include");
-            exe.addLibraryPath("./wlibs/lib");
-
-            exe.linkSystemLibrary("kernel32");
-            exe.linkSystemLibrary("user32");
-            exe.linkSystemLibrary("gdi32");
-            exe.linkSystemLibrary("oleaut32");
-            exe.linkSystemLibrary("ole32");
-            exe.linkSystemLibrary("imm32");
-            exe.linkSystemLibrary("winmm");
-            exe.linkSystemLibrary("version");
-            exe.linkSystemLibrary("setupapi");
-            exe.linkSystemLibrary("xinput"); // Not provided by Zig, grab from MinGW-W64, needed for later SDL2 versions
-            exe.linkSystemLibrary("SDL2main");
-            exe.linkSystemLibrary("mingw32");
+            // TODO: Add more crap when needed --GM
+            // TODO: Look into jettisoning libc --GM
+            exe.linkLibC();
+            exe.linkSystemLibrary("opengl32");
+            exe.linkSystemLibrary("ws2_32");
         },
         .freestanding => {
             // Could be wasm32, if so, disable stack smashing protection as it is currently broken --GM
             exe.stack_protector = false;
         },
         else => {
-            // TODO: Get the actual path properly --GM
-            exe.addIncludePath("/usr/include/SDL2");
+            exe.linkLibC();
+            exe.linkSystemLibrary("GL");
+            exe.linkSystemLibrary("X11");
 
             // Non-native 32-bit builds need these paths for me --GM
             // exe.addIncludePath("/usr/include");
             // exe.addLibraryPath("/usr/lib32");
         },
     }
-    exe.linkSystemLibrary("c");
-    exe.linkSystemLibrary("SDL2");
-    exe.linkSystemLibrary("GL");
 
     return exe;
 }

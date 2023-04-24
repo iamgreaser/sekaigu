@@ -4,6 +4,10 @@ const log = std.log.scoped(.webserver);
 const os = std.os;
 const http = std.http;
 
+// Unsurprisingly, Microsoft have no clue what "compatibility" means.
+pub const POLLIN = if (builtin.target.os.tag == .windows) os.POLL.RDNORM else os.POLL.IN;
+pub const POLLOUT = if (builtin.target.os.tag == .windows) os.POLL.WRNORM else os.POLL.OUT;
+
 // TODO: Allow a custom port --GM
 pub const PORT = 10536;
 pub const POLL_TIMEOUT_MSEC = 200; // How often do we ensure that we wake this thread?
@@ -48,7 +52,7 @@ pub const WebServer = struct {
     responses_backing: [MAX_HTTP_RESPONSES]ResponsePool.ChainedItem = [1]ResponsePool.ChainedItem{ResponsePool.ChainedItem{}} ** MAX_HTTP_RESPONSES,
     responses: ResponsePool = ResponsePool{},
 
-    server_sockfd: os.socket_t = -1,
+    server_sockfd: ?os.socket_t,
     thread: ?std.Thread = null,
     thread_shutdown: std.Thread.ResetEvent = .{},
     poll_list: [1 + MAX_CLIENTS]os.pollfd = undefined,
@@ -100,14 +104,15 @@ pub const WebServer = struct {
         try os.setsockopt(
             server_sockfd,
             os.SOL.SOCKET,
-            os.SO.REUSEPORT,
+            if (builtin.os.tag == .windows) os.SO.REUSEADDR else os.SO.REUSEPORT,
             @ptrCast([*]const u8, &@as(i32, 1))[0..@sizeOf(i32)],
         );
         // FIXME: Zig does not expose IPV6_V6ONLY properly when libc is used, so we have to use the constants. --GM
         //try os.setsockopt(server_sockfd, os.IPPROTO.IPV6, os.system.IPV6.V6ONLY, "\x00");
         try os.setsockopt(
             server_sockfd,
-            os.IPPROTO.IPV6,
+            // As much as I like to blame Windows for being garbage, the lack of this value being defined is actually Zig's fault. --GM
+            if (builtin.os.tag == .windows) 41 else os.IPPROTO.IPV6,
             if (builtin.os.tag == .linux) 26 else 27,
             @ptrCast([*]const u8, &@as(i32, 0))[0..@sizeOf(i32)],
         );
@@ -151,10 +156,10 @@ pub const WebServer = struct {
         log.info("Stopping clients", .{});
         self.clients.deinit();
 
-        if (self.server_sockfd >= 0) {
+        if (self.server_sockfd) |sockfd| {
             log.info("Closing socket", .{});
-            os.closeSocket(self.server_sockfd);
-            self.server_sockfd = -1;
+            os.closeSocket(sockfd);
+            self.server_sockfd = null;
         }
         log.info("Web server deinitialised", .{});
     }
@@ -174,8 +179,8 @@ pub const WebServer = struct {
         // Poll for new clients
         var poll_count: usize = 1;
         self.poll_list[0] = os.pollfd{
-            .fd = self.server_sockfd,
-            .events = os.POLL.IN,
+            .fd = self.server_sockfd.?,
+            .events = POLLIN,
             .revents = 0,
         };
         self.poll_clients[0] = null;
@@ -184,7 +189,7 @@ pub const WebServer = struct {
             var client_iter = self.clients.iterUsed();
             while (client_iter.next()) |client| {
                 self.poll_list[poll_count] = os.pollfd{
-                    .fd = client.child.sockfd,
+                    .fd = client.child.sockfd.?,
                     .events = client.child.expectedPollEvents(),
                     .revents = 0,
                 };
@@ -193,13 +198,27 @@ pub const WebServer = struct {
             }
         }
 
-        const polls_to_read = try os.poll(self.poll_list[0..poll_count], POLL_TIMEOUT_MSEC);
+        const polls_to_read = if (builtin.target.os.tag == .windows)
+            // FIXME: Untill the poll() wrapper actually behaves itself in Zig, we need to copy-paste from os.poll. --GM
+            switch (os.windows.ws2_32.WSAPoll(&self.poll_list, @intCast(u32, poll_count), POLL_TIMEOUT_MSEC)) {
+                os.windows.ws2_32.SOCKET_ERROR => switch (os.windows.ws2_32.WSAGetLastError()) {
+                    .WSANOTINITIALISED => unreachable,
+                    .WSAENETDOWN => return error.NetworkSubsystemFailed,
+                    .WSAENOBUFS => return error.SystemResources,
+                    // TODO: handle more errors
+                    else => |err| return os.windows.unexpectedWSAError(err),
+                },
+                else => |result| @intCast(usize, result),
+            }
+        else
+            try os.poll(self.poll_list[0..poll_count], POLL_TIMEOUT_MSEC);
+
         if (polls_to_read == 0) return;
         for (0..poll_count) |i| {
             const p = &self.poll_list[i];
-            if (p.fd == self.server_sockfd) {
+            if (p.fd == self.server_sockfd.?) {
                 // Update server
-                if ((p.revents & os.POLL.IN) != 0) {
+                if ((p.revents & POLLIN) != 0) {
                     self.acceptNewClient() catch |err| {
                         log.err("Error when attempting to accept a new client: {}", .{err});
                     };
@@ -207,7 +226,7 @@ pub const WebServer = struct {
             } else if (self.poll_clients[i]) |client| {
                 // Update client
                 // On failure, Let It Crash(tm)
-                client.child.update((p.revents & os.POLL.IN) != 0) catch |err| {
+                client.child.update((p.revents & POLLIN) != 0) catch |err| {
                     log.err("HTTP client error, terminating: {}", .{err});
                     self.clients.release(client);
                 };
@@ -220,7 +239,7 @@ pub const WebServer = struct {
         var sock_addr: os.sockaddr.in6 = undefined;
         var sock_addr_len: u32 = @sizeOf(@TypeOf(sock_addr));
         const client_sockfd = try os.accept(
-            self.server_sockfd,
+            self.server_sockfd.?,
             @ptrCast(*os.sockaddr, &sock_addr),
             &sock_addr_len,
             0,
