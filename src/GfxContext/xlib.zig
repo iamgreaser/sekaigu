@@ -63,11 +63,13 @@ width: u16 = 800,
 height: u16 = 600,
 x11_display: ?*C.Display = null,
 x11_window: ?C.Window = null,
-glx_context: C.GLXContext = null,
 glx_window: ?C.GLXWindow = null,
+glx_context: C.GLXContext = null,
 
 atoms: struct {
     UTF8_STRING: C.Atom,
+    WM_DELETE_WINDOW: C.Atom,
+    WM_PROTOCOLS: C.Atom,
     _NET_WM_ICON_NAME: C.Atom,
     _NET_WM_NAME: C.Atom,
 } = undefined,
@@ -85,6 +87,7 @@ pub extern fn glXCreateWindow(
     win: C.Window,
     attrib_list: [*:0]const c_int,
 ) callconv(.C) C.GLXWindow;
+pub extern fn glXDestroyWindow(dpy: *C.Display, ctx: C.GLXWindow) callconv(.C) void;
 
 pub extern fn glXMakeContextCurrent(
     dpy: *C.Display,
@@ -92,6 +95,7 @@ pub extern fn glXMakeContextCurrent(
     read: C.GLXDrawable,
     ctx: C.GLXContext,
 ) callconv(.C) C.Bool;
+pub extern fn glXDestroyContext(dpy: *C.Display, ctx: C.GLXContext) callconv(.C) void;
 
 pub extern fn glXWaitGL() callconv(.C) void;
 pub extern fn glXWaitX() callconv(.C) void;
@@ -211,8 +215,24 @@ pub fn init(self: *Self) anyerror!void {
         self.glx_context.?,
     );
 
-    // Set window title (TODO: and icon? --GM)
+    log.info("Setting window properties", .{});
+    var wm_protocols = [_]C.Atom{
+        self.atoms.WM_DELETE_WINDOW,
+    };
+    _ = try notNull(C.Status, C.XSetWMProtocols(
+        self.x11_display.?,
+        self.x11_window.?,
+        &wm_protocols,
+        wm_protocols[0..].len,
+    ));
     self.setTitle("sekaigu pre-alpha");
+
+    log.info("Selecting inputs for window", .{});
+    _ = C.XSelectInput(
+        self.x11_display.?,
+        self.x11_window.?,
+        C.KeyPressMask | C.KeyReleaseMask,
+    );
 
     log.info("Showing window", .{});
     _ = C.XMapRaised(self.x11_display.?, self.x11_window.?);
@@ -229,24 +249,27 @@ pub fn init(self: *Self) anyerror!void {
 }
 
 pub fn free(self: *Self) void {
-    if (self.glx_window) |p| {
-        log.info("Disposing of GLX window", .{});
-        log.warn("TODO: Actually delete glx_window --GM", .{});
-        _ = p;
-        self.glx_window = null;
-    }
-
     if (self.glx_context) |p| {
         log.info("Disposing of GLX context", .{});
-        log.warn("TODO: Actually delete glx_context --GM", .{});
-        _ = p;
+        _ = glXMakeContextCurrent(
+            self.x11_display.?,
+            C.None,
+            C.None,
+            p,
+        );
+        glXDestroyContext(self.x11_display.?, p);
         self.glx_context = null;
+    }
+
+    if (self.glx_window) |p| {
+        log.info("Disposing of GLX window", .{});
+        glXDestroyWindow(self.x11_display.?, p);
+        self.glx_window = null;
     }
 
     if (self.x11_window) |p| {
         log.info("Disposing of window", .{});
-        log.warn("TODO: Actually delete x11_window --GM", .{});
-        _ = p;
+        _ = C.XDestroyWindow(self.x11_display.?, p);
         self.x11_window = null;
     }
 
@@ -288,7 +311,21 @@ pub fn applyEvents(self: *Self, comptime TKeys: type, keys: *TKeys) anyerror!boo
     for (0..evcount) |_| {
         var ev: C.XEvent = undefined;
         _ = C.XNextEvent(self.x11_display.?, &ev);
-        log.debug("XEv {any}", .{ev});
+        switch (ev.type) {
+            C.KeyPress, C.KeyRelease => {
+                log.debug("XEv {any} Key {any}", .{ ev.type, ev.xkey });
+            },
+            C.ClientMessage => {
+                log.debug("XEv {any} Client {any}", .{ ev.type, ev.xclient });
+                if (ev.xclient.data.l[0] == self.atoms.WM_DELETE_WINDOW) {
+                    log.info("WM_DELETE_WINDOW received, shutting down", .{});
+                    return true;
+                }
+            },
+            else => {
+                log.debug("XEv {any} {any}", .{ ev.type, ev });
+            },
+        }
     }
     return false;
 }
