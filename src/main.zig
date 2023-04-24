@@ -443,28 +443,48 @@ pub usingnamespace if (builtin.target.os.tag == .windows) struct {
             }
         };
     }
+
+    pub fn base_main() !void {
+        try init();
+        defer destroy();
+
+        var dt: f32 = 0.0;
+        while (!try update_all(&dt)) {
+            var msg: std.os.windows.user32.MSG = undefined;
+            while (std.os.windows.user32.PeekMessageW(&msg, null, 0, 0, 0x0001) != 0) { // 0x0001 = PM_REMOVE
+                // PeekMessage returns zero only if there's no messages.
+                // So to simulate the usual "while GetMessage > 0" loop, we need to detect WM_QUIT explicitly.
+                if (@truncate(u16, msg.message) == std.os.windows.user32.WM_QUIT)
+                    return;
+
+                _ = std.os.windows.user32.TranslateMessage(&msg);
+                _ = std.os.windows.user32.DispatchMessageW(&msg);
+            }
+        }
+    }
 } else struct {
     pub fn main() !void {
-        try base_main();
+        try init();
+        defer destroy();
+
+        var dt: f32 = 0.0;
+        while (!try update_all(&dt)) {}
     }
 };
 
-pub fn base_main() !void {
-    try init();
-    defer destroy();
-
-    var dt: f32 = 0.0;
-    done: while (true) {
-        fps_counter += 1;
-        try drawScene();
-        gfx.flip();
-        try tickScene(dt);
-        try webserver.update();
-        if (try gfx.applyEvents(@TypeOf(keys), &keys)) {
-            break :done;
-        }
-        dt = try updateTime();
+pub fn update_all(dtptr: *f32) !bool {
+    var dt: f32 = dtptr.*;
+    fps_counter += 1;
+    try drawScene();
+    try gfx.flip();
+    try tickScene(dt);
+    try webserver.update();
+    if (try gfx.applyEvents(@TypeOf(keys), &keys)) {
+        return true;
     }
+    dt = try updateTime();
+    dtptr.* = dt;
+    return false;
 }
 
 var local_player_backing: LocalPlayer = .{};
@@ -675,7 +695,7 @@ pub fn updateTime() !f32 {
         {
             //log.debug("FPS: {}", .{fps_counter});
             var buf: [128]u8 = undefined;
-            gfx.setTitle(try std.fmt.bufPrintZ(&buf, "sekaigu pre-alpha | FPS: {}", .{fps_counter}));
+            try gfx.setTitle(try std.fmt.bufPrintZ(&buf, "sekaigu pre-alpha | FPS: {}", .{fps_counter}));
         }
         if (fps_time_accum >= (time.ns_per_s * 1) * 2) {
             log.warn("FPS counter slipped! Time wasted (nsec): {}", .{fps_time_accum});

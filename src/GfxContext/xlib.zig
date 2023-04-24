@@ -225,7 +225,7 @@ pub fn init(self: *Self) anyerror!void {
         &wm_protocols,
         wm_protocols[0..].len,
     ));
-    self.setTitle("sekaigu pre-alpha");
+    try self.setTitle("sekaigu pre-alpha");
 
     log.info("Selecting inputs for window", .{});
     _ = C.XSelectInput(
@@ -282,7 +282,7 @@ pub fn free(self: *Self) void {
     self.* = undefined;
 }
 
-pub fn setTitle(self: *Self, title: [:0]const u8) void {
+pub fn setTitle(self: *Self, title: [:0]const u8) !void {
     C.XSetTextProperty(self.x11_display.?, self.x11_window.?, &C.XTextProperty{
         .value = @constCast(title),
         .encoding = self.atoms.UTF8_STRING,
@@ -291,7 +291,7 @@ pub fn setTitle(self: *Self, title: [:0]const u8) void {
     }, self.atoms._NET_WM_NAME);
 }
 
-pub fn flip(self: *Self) void {
+pub fn flip(self: *Self) !void {
     // TODO actually work out how much of this is necessary --GM
     glXWaitGL();
     glXSwapBuffers(self.x11_display.?, self.glx_window.?);

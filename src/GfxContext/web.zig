@@ -34,7 +34,7 @@ pub fn init(self: *Self) anyerror!void {
     _ = C.glGetError();
 }
 
-pub fn setTitle(self: *Self, title: [:0]const u8) void {
+pub fn setTitle(self: *Self, title: [:0]const u8) !void {
     // TODO! --GM
     _ = self;
     _ = title;
@@ -46,7 +46,7 @@ pub fn free(self: *Self) void {
     _ = self;
 }
 
-pub fn flip(self: *Self) void {
+pub fn flip(self: *Self) !void {
     // Handled as part of the JS event loop.
     _ = self;
 }
