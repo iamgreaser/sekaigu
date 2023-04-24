@@ -38,7 +38,7 @@ pub fn linkProgram(self: *Self) !void {
         var buf = C.glGetProgramInfoLog(self.handle);
         log.info("PROGRAM LOG: <<<\n{s}\n>>>", .{buf});
     } else {
-        var buf: [1024]u8 = undefined;
+        var buf: [1024:0]u8 = undefined;
         var buflen: C.GLsizei = 0;
         C.glGetProgramInfoLog(self.handle, buf.len, &buflen, &buf);
         log.info("PROGRAM LOG: <<<\n{s}\n>>>", .{buf[0..@intCast(usize, buflen)]});
@@ -50,7 +50,7 @@ pub fn getUniformLocation(self: *Self, name: [:0]const u8) !C.GLint {
     const idx = if (comptime builtin.target.isWasm())
         C.glGetUniformLocation(self.handle, &name[0], name.len)
     else
-        C.glGetUniformLocation(self.handle, &name[0]);
+        C.glGetUniformLocation(self.handle, name);
     try _TestError();
     return idx;
 }
@@ -61,16 +61,16 @@ pub fn uniform(self: *Self, idx: C.GLint, comptime T: type, value: T) !void {
         switch (T) {
             u8, i8, u16, i16, u32, i32 => C.glUniform1i(idx, value),
             f32 => C.glUniform1f(idx, value),
-            Vec2f => C.glUniform2fv(idx, 1, &value.a[0]),
-            Vec3f => C.glUniform3fv(idx, 1, &value.a[0]),
-            Vec4f => C.glUniform4fv(idx, 1, &value.a[0]),
+            Vec2f => C.glUniform2fv(idx, 1, &value.a),
+            Vec3f => C.glUniform3fv(idx, 1, &value.a),
+            Vec4f => C.glUniform4fv(idx, 1, &value.a),
             // ES2 spec v2.0.25:
             // > If the `transpose` parameter to any of the UniformMatrix* commands
             // > is not `FALSE`, an `INVALID_VALUE` error is generated,
             // > and no uniform values are changed.
-            Mat2f => C.glUniformMatrix2fv(idx, 1, C.GL_FALSE, &value.a[0]),
-            Mat3f => C.glUniformMatrix3fv(idx, 1, C.GL_FALSE, &value.a[0]),
-            Mat4f => C.glUniformMatrix4fv(idx, 1, C.GL_FALSE, &value.a[0]),
+            Mat2f => C.glUniformMatrix2fv(idx, 1, C.GL_FALSE, &value.a),
+            Mat3f => C.glUniformMatrix3fv(idx, 1, C.GL_FALSE, &value.a),
+            Mat4f => C.glUniformMatrix4fv(idx, 1, C.GL_FALSE, &value.a),
             gl.Sampler2D => {
                 // FIXME clobbers GL_ACTIVE_TEXTURE state --GM
                 try gl.activeTexture(value.index);

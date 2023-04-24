@@ -72,6 +72,10 @@ pub fn init(self: *Self) anyerror!void {
         return error.GLFailed;
     }
 
+    // Load extensions
+    log.info("Loading OpenGL extensions", .{});
+    try C.loadGlExtensions(C.SDL_GL_GetProcAddress);
+
     // Clean up any latent OpenGL error
     _ = C.glGetError();
 }

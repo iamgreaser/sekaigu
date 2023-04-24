@@ -77,7 +77,7 @@ pub fn build(b: *Build) void {
         exe_tests.addIncludePath("/usr/include/SDL2");
         exe_tests.linkSystemLibrary("c");
         exe_tests.linkSystemLibrary("SDL2");
-        exe_tests.linkSystemLibrary("epoxy");
+        exe_tests.linkSystemLibrary("GL");
 
         const test_step = b.step("test", "Run unit tests");
         test_step.dependOn(&exe_tests.step);
@@ -114,10 +114,10 @@ pub fn buildTarget(b: *Build, target: std.zig.CrossTarget, optimize: std.builtin
             //     error: lld-link: ___stack_chk_fail was replaced
             // --GM
 
+            // TODO: Update for a direct OpenGL binding which doesn't touch libepoxy --GM
+
             // Libraries to grab:
             // - SDL2 - MinGW development version
-            // - libepoxy - build this yourself, zig cc seems to handle it OK?
-            //     - We might have to bring this in as a submodule. --GM
             exe.addIncludePath("./wlibs/include");
             exe.addLibraryPath("./wlibs/lib");
 
@@ -149,7 +149,7 @@ pub fn buildTarget(b: *Build, target: std.zig.CrossTarget, optimize: std.builtin
     }
     exe.linkSystemLibrary("c");
     exe.linkSystemLibrary("SDL2");
-    exe.linkSystemLibrary("epoxy");
+    exe.linkSystemLibrary("GL");
 
     return exe;
 }

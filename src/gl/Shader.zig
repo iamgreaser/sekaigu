@@ -27,7 +27,7 @@ pub fn shaderSource(shader: Self, src: [:0]const u8) !void {
         C.glShaderSource(
             shader.handle,
             1,
-            &[_][*c]const u8{&src[0]},
+            &[_][*:0]const u8{src},
             null,
         );
     }
@@ -40,7 +40,7 @@ pub fn compileShader(self: Self) !void {
         const buf = C.glGetShaderInfoLog(self.handle);
         log.info("SHADER LOG: <<<\n{s}\n>>>", .{buf});
     } else {
-        var buf: [1024]u8 = undefined;
+        var buf: [1024:0]u8 = undefined;
         var buflen: C.GLsizei = 0;
         C.glGetShaderInfoLog(self.handle, buf.len, &buflen, &buf);
         log.info("SHADER LOG: <<<\n{s}\n>>>", .{buf[0..@intCast(usize, buflen)]});

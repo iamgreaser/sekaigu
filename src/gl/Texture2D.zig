@@ -12,14 +12,14 @@ pub const TARGET = C.GL_TEXTURE_2D;
 pub const Dummy = Self{ .handle = 0 };
 
 pub fn genTexture() !Self {
-    var handle: C.GLuint = 0;
+    var handles: [1]C.GLuint = .{0};
     if (comptime builtin.target.isWasm()) {
-        handle = C.glCreateTexture();
+        handles[0] = C.glCreateTexture();
     } else {
-        C.glGenTextures(1, &handle);
+        C.glGenTextures(1, &handles);
     }
     try _TestError();
-    return Self{ .handle = handle };
+    return Self{ .handle = handles[0] };
 }
 
 pub fn bindTexture(texture: Self) !void {
