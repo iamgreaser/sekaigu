@@ -306,14 +306,37 @@ pub fn handleResize(self: *Self, width: i32, height: i32) !void {
 }
 
 pub fn applyEvents(self: *Self, comptime TKeys: type, keys: *TKeys) anyerror!bool {
-    _ = keys;
     const evcount: usize = @intCast(usize, C.XEventsQueued(self.x11_display.?, C.QueuedAfterFlush));
     for (0..evcount) |_| {
         var ev: C.XEvent = undefined;
         _ = C.XNextEvent(self.x11_display.?, &ev);
         switch (ev.type) {
             C.KeyPress, C.KeyRelease => {
-                log.debug("XEv {any} Key {any}", .{ ev.type, ev.xkey });
+                const state = (ev.type == C.KeyPress);
+                // TODO: Set up XIM and XIC contexts so we can parse text (and support IMEs!) --GM
+                const keysym = C.XLookupKeysym(&ev.xkey, 0);
+                // TODO: Handle keysym == NoSymbol (also required for IMEs!) --GM
+
+                log.debug("XEv Key {s} {X:0>8}", .{
+                    if (state) "1" else "0",
+                    keysym,
+                });
+
+                noPress: {
+                    (switch (keysym) {
+                        C.XK_w => &keys.w,
+                        C.XK_a => &keys.a,
+                        C.XK_s => &keys.s,
+                        C.XK_d => &keys.d,
+                        C.XK_c => &keys.c,
+                        C.XK_space => &keys.SPACE,
+                        C.XK_Left => &keys.LEFT,
+                        C.XK_Right => &keys.RIGHT,
+                        C.XK_Up => &keys.UP,
+                        C.XK_Down => &keys.DOWN,
+                        else => break :noPress,
+                    }).* = state;
+                }
             },
             C.ClientMessage => {
                 log.debug("XEv {any} Client {any}", .{ ev.type, ev.xclient });
