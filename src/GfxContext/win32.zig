@@ -140,7 +140,6 @@ fn wndProc(hWnd: windows.HWND, uMsg: windows.UINT, wParam: windows.WPARAM, lPara
 }
 
 fn wndProcWrapped(self: *Self, hWnd: windows.HWND, uMsg: windows.UINT, wParam: windows.WPARAM, lParam: windows.LPARAM) !windows.LRESULT {
-    // TODO! --GM
     switch (uMsg) {
         windows.user32.WM_CREATE => {
             const pfd = windows.gdi32.PIXELFORMATDESCRIPTOR{
@@ -243,6 +242,14 @@ fn wndProcWrapped(self: *Self, hWnd: windows.HWND, uMsg: windows.UINT, wParam: w
             if (!windows.gdi32.wglMakeCurrent(self.hDC.?, self.gl_context.?)) return error.GLContextUseFailed;
 
             self.context_initialised = true;
+            return 0;
+        },
+
+        windows.user32.WM_SIZE => {
+            const width = @truncate(u16, @intCast(u32, lParam));
+            const height = @intCast(u16, @intCast(u32, lParam) >> 16);
+            log.debug("Resize {d} x {d}", .{ width, height });
+            try self.handleResize(width, height);
             return 0;
         },
 
