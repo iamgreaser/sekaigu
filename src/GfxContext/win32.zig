@@ -14,9 +14,25 @@ const Self = @This();
 const WINAPI = windows.WINAPI;
 
 // missing function prototypes - TODO get these added into Zig --GM
-pub extern fn SetWindowTextW(hWnd: windows.HWND, lpString: [*:0]u16) callconv(WINAPI) windows.BOOL;
-pub extern fn wglDeleteContext(unnamedParam1: ?windows.HGLRC) callconv(WINAPI) windows.BOOL;
-pub extern fn wglGetProcAddress(unnamedParam1: [*:0]const u8) callconv(WINAPI) ?*const fn () callconv(WINAPI) void;
+extern fn SetWindowTextW(hWnd: windows.HWND, lpString: [*:0]u16) callconv(WINAPI) windows.BOOL;
+extern fn wglDeleteContext(unnamedParam1: ?windows.HGLRC) callconv(WINAPI) windows.BOOL;
+extern fn wglGetProcAddress(unnamedParam1: [*:0]const u8) callconv(WINAPI) ?*const fn () callconv(WINAPI) void;
+
+// things which are older than what Zig would actually care about
+const WNDCLASSW = extern struct {
+    style: windows.UINT,
+    lpfnWndProc: windows.user32.WNDPROC,
+    cbClsExtra: i32 = 0,
+    cbWndExtra: i32 = 0,
+    hInstance: windows.HINSTANCE,
+    hIcon: ?windows.HICON,
+    hCursor: ?windows.HCURSOR,
+    hbrBackground: ?windows.HBRUSH,
+    lpszMenuName: ?[*:0]const u16,
+    lpszClassName: [*:0]const u16,
+};
+pub extern "user32" fn RegisterClassW(*const WNDCLASSW) callconv(WINAPI) windows.ATOM;
+pub extern "user32" fn CreateWindowExW(dwExStyle: windows.DWORD, lpClassName: [*:0]const u16, lpWindowName: [*:0]const u16, dwStyle: windows.DWORD, X: i32, Y: i32, nWidth: i32, nHeight: i32, hWindParent: ?windows.HWND, hMenu: ?windows.HMENU, hInstance: windows.HINSTANCE, lpParam: ?windows.LPVOID) callconv(WINAPI) ?windows.HWND;
 
 // extra WGL enums
 const WGL_CONTEXT_MAJOR_VERSION_ARB = 0x2091;
@@ -89,7 +105,7 @@ pub fn init(self: *Self) anyerror!void {
     self.hInstance = @ptrCast(?windows.HINSTANCE, windows.kernel32.GetModuleHandleW(null) orelse return error.NotFound);
 
     log.info("Registering window class", .{});
-    const wc = windows.user32.WNDCLASSEXW{
+    const wc = WNDCLASSW{
         .style = windows.user32.CS_OWNDC,
         .lpfnWndProc = wndProc,
         .hInstance = self.hInstance.?,
@@ -98,13 +114,16 @@ pub fn init(self: *Self) anyerror!void {
         .hbrBackground = null,
         .lpszMenuName = null,
         .lpszClassName = OUR_WNDCLASS,
-        .hIconSm = null,
     };
-    _ = try windows.user32.registerClassExW(&wc);
+    if (RegisterClassW(&wc) == 0) {
+        const winerr = windows.kernel32.GetLastError();
+        log.err("Windows error {d}", .{winerr});
+        return error.Failed;
+    }
 
     log.info("Creating window", .{});
-    self.hWnd = try windows.user32.createWindowExW(
-        windows.user32.WS_EX_APPWINDOW,
+    self.hWnd = CreateWindowExW(
+        0,
         wc.lpszClassName,
         &[_:0]u16{ '<', '>' },
         windows.user32.WS_OVERLAPPEDWINDOW,
@@ -116,7 +135,11 @@ pub fn init(self: *Self) anyerror!void {
         null,
         self.hInstance.?,
         null,
-    );
+    ) orelse {
+        const winerr = windows.kernel32.GetLastError();
+        log.err("Windows error {d}", .{winerr});
+        return error.Failed;
+    };
 
     log.info("Setting window title", .{});
     try self.setTitle("sekaigu pre-alpha");

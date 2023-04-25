@@ -8,6 +8,21 @@ const http = std.http;
 pub const POLLIN = if (builtin.target.os.tag == .windows) os.POLL.RDNORM else os.POLL.IN;
 pub const POLLOUT = if (builtin.target.os.tag == .windows) os.POLL.WRNORM else os.POLL.OUT;
 
+// FIXME: Get Zig to actually use the correct Windows TIMEVAL --GM
+const winhelpers = if (builtin.target.os.tag == .windows) struct {
+    pub const TIMEVAL = struct {
+        tv_sec: c_long,
+        tv_usec: c_long,
+    };
+    pub extern "ws2_32" fn select(
+        nfds: i32,
+        readfds: ?*os.windows.ws2_32.fd_set,
+        writefds: ?*os.windows.ws2_32.fd_set,
+        exceptfds: ?*os.windows.ws2_32.fd_set,
+        timeout: ?*const TIMEVAL,
+    ) callconv(os.windows.WINAPI) i32;
+} else struct {};
+
 // TODO: Allow a custom port --GM
 pub const PORT = 10536;
 pub const POLL_TIMEOUT_MSEC = 200; // How often do we ensure that we wake this thread?
@@ -54,9 +69,26 @@ pub const WebServer = struct {
 
     server_sockfd: ?os.socket_t,
     thread: ?std.Thread = null,
-    thread_shutdown: std.Thread.ResetEvent = .{},
+    thread_shutdown: if (builtin.target.os.tag == .windows) struct {
+        const RE = @This();
+        state: bool = false,
+        pub fn set(self: *RE) void {
+            @ptrCast(*volatile bool, &self.state).* = true;
+        }
+        pub fn reset(self: *RE) void {
+            @ptrCast(*volatile bool, &self.state).* = false;
+        }
+        pub fn isSet(self: *RE) bool {
+            return @ptrCast(*volatile bool, &self.state).*;
+        }
+    } else std.Thread.ResetEvent = .{},
     poll_list: [1 + MAX_CLIENTS]os.pollfd = undefined,
     poll_clients: [1 + MAX_CLIENTS]?*ChainedClientState = undefined,
+    windows: if (builtin.target.os.tag == .windows) struct {
+        readfds: os.windows.ws2_32.fd_set = undefined,
+        writefds: os.windows.ws2_32.fd_set = undefined,
+        exceptfds: os.windows.ws2_32.fd_set = undefined,
+    } else struct {} = .{},
 
     // Embedded files
     const FileNameAndBlob = struct {
@@ -177,59 +209,128 @@ pub const WebServer = struct {
 
     fn updateWorkerTick(self: *Self) !void {
         // Poll for new clients
-        var poll_count: usize = 1;
-        self.poll_list[0] = os.pollfd{
-            .fd = self.server_sockfd.?,
-            .events = POLLIN,
-            .revents = 0,
-        };
-        self.poll_clients[0] = null;
-
-        {
-            var client_iter = self.clients.iterUsed();
-            while (client_iter.next()) |client| {
-                self.poll_list[poll_count] = os.pollfd{
-                    .fd = client.child.sockfd.?,
-                    .events = client.child.expectedPollEvents(),
-                    .revents = 0,
-                };
-                self.poll_clients[poll_count] = client;
-                poll_count += 1;
+        if (builtin.target.os.tag == .windows) {
+            // Windows. Use select().
+            // FIXME: This will crash once it exceeds 64 FDs! --GM
+            self.windows.readfds.fd_count = 0;
+            self.windows.writefds.fd_count = 0;
+            self.windows.exceptfds.fd_count = 0;
+            self.windows.readfds.fd_array[self.windows.readfds.fd_count] = self.server_sockfd.?;
+            self.windows.readfds.fd_count += 1;
+            var poll_count: usize = 1;
+            self.poll_clients[0] = null;
+            {
+                var client_iter = self.clients.iterUsed();
+                while (client_iter.next()) |client| {
+                    const pollevents = client.child.expectedPollEvents();
+                    if ((pollevents & POLLIN) != 0) {
+                        self.windows.readfds.fd_array[self.windows.readfds.fd_count] = client.child.sockfd.?;
+                        self.windows.readfds.fd_count += 1;
+                    }
+                    if ((pollevents & POLLOUT) != 0) {
+                        self.windows.writefds.fd_array[self.windows.writefds.fd_count] = client.child.sockfd.?;
+                        self.windows.writefds.fd_count += 1;
+                    }
+                    self.poll_clients[poll_count] = client;
+                    poll_count += 1;
+                }
             }
-        }
 
-        const polls_to_read = if (builtin.target.os.tag == .windows)
-            // FIXME: Untill the poll() wrapper actually behaves itself in Zig, we need to copy-paste from os.poll. --GM
-            switch (os.windows.ws2_32.WSAPoll(&self.poll_list, @intCast(u32, poll_count), POLL_TIMEOUT_MSEC)) {
-                os.windows.ws2_32.SOCKET_ERROR => switch (os.windows.ws2_32.WSAGetLastError()) {
-                    .WSANOTINITIALISED => unreachable,
-                    .WSAENETDOWN => return error.NetworkSubsystemFailed,
-                    .WSAENOBUFS => return error.SystemResources,
-                    // TODO: handle more errors
-                    else => |err| return os.windows.unexpectedWSAError(err),
-                },
-                else => |result| @intCast(usize, result),
-            }
-        else
-            try os.poll(self.poll_list[0..poll_count], POLL_TIMEOUT_MSEC);
-
-        if (polls_to_read == 0) return;
-        for (0..poll_count) |i| {
-            const p = &self.poll_list[i];
-            if (p.fd == self.server_sockfd.?) {
-                // Update server
-                if ((p.revents & POLLIN) != 0) {
+            // First argument is ignored on Windows.
+            // Oddly enough, this is one of those rare cases where Microsoft actually *improved* on BSD sockets.
+            const timeout = winhelpers.TIMEVAL{
+                .tv_sec = (POLL_TIMEOUT_MSEC * 1000) / 1_000_000,
+                .tv_usec = (POLL_TIMEOUT_MSEC * 1000) % 1_000_000,
+            };
+            const out_nfds = winhelpers.select(
+                1,
+                &self.windows.readfds,
+                &self.windows.writefds,
+                &self.windows.exceptfds,
+                &timeout,
+            );
+            if (out_nfds == 0) return;
+            for (self.windows.readfds.fd_array[0..self.windows.readfds.fd_count]) |p| {
+                if (self.server_sockfd != null and p == self.server_sockfd.?) {
+                    log.debug("recv server", .{});
+                    // Update server
                     self.acceptNewClient() catch |err| {
                         log.err("Error when attempting to accept a new client: {}", .{err});
                     };
+                } else {
+                    for (self.poll_clients[0..poll_count]) |optclient| {
+                        if (optclient) |client| {
+                            if (client.child.sockfd != null and client.child.sockfd.? == p) {
+                                log.debug("recv client", .{});
+                                // Update client
+                                // On failure, Let It Crash(tm)
+                                client.child.update(true) catch |err| {
+                                    log.err("HTTP client error, terminating: {}", .{err});
+                                    self.clients.release(client);
+                                };
+                            }
+                        }
+                    }
                 }
-            } else if (self.poll_clients[i]) |client| {
-                // Update client
-                // On failure, Let It Crash(tm)
-                client.child.update((p.revents & POLLIN) != 0) catch |err| {
-                    log.err("HTTP client error, terminating: {}", .{err});
-                    self.clients.release(client);
-                };
+            }
+
+            for (self.windows.writefds.fd_array[0..self.windows.writefds.fd_count]) |p| {
+                for (self.poll_clients[0..poll_count]) |optclient| {
+                    if (optclient) |client| {
+                        if (client.child.sockfd != null and client.child.sockfd.? == p) {
+                            log.debug("send client", .{});
+                            // Update client
+                            // On failure, Let It Crash(tm)
+                            client.child.update(false) catch |err| {
+                                log.err("HTTP client error, terminating: {}", .{err});
+                                self.clients.release(client);
+                            };
+                        }
+                    }
+                }
+            }
+        } else {
+            // Not Windows. Use poll().
+            var poll_count: usize = 1;
+            self.poll_list[0] = os.pollfd{
+                .fd = self.server_sockfd.?,
+                .events = POLLIN,
+                .revents = 0,
+            };
+            self.poll_clients[0] = null;
+
+            {
+                var client_iter = self.clients.iterUsed();
+                while (client_iter.next()) |client| {
+                    self.poll_list[poll_count] = os.pollfd{
+                        .fd = client.child.sockfd.?,
+                        .events = client.child.expectedPollEvents(),
+                        .revents = 0,
+                    };
+                    self.poll_clients[poll_count] = client;
+                    poll_count += 1;
+                }
+            }
+
+            const polls_to_read = try os.poll(self.poll_list[0..poll_count], POLL_TIMEOUT_MSEC);
+            if (polls_to_read == 0) return;
+            for (0..poll_count) |i| {
+                const p = &self.poll_list[i];
+                if (p.fd == self.server_sockfd.?) {
+                    // Update server
+                    if ((p.revents & POLLIN) != 0) {
+                        self.acceptNewClient() catch |err| {
+                            log.err("Error when attempting to accept a new client: {}", .{err});
+                        };
+                    }
+                } else if (self.poll_clients[i]) |client| {
+                    // Update client
+                    // On failure, Let It Crash(tm)
+                    client.child.update((p.revents & POLLIN) != 0) catch |err| {
+                        log.err("HTTP client error, terminating: {}", .{err});
+                        self.clients.release(client);
+                    };
+                }
             }
         }
     }
