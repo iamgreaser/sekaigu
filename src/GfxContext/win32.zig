@@ -145,7 +145,38 @@ pub fn init(self: *Self) anyerror!void {
 }
 
 pub fn free(self: *Self) void {
-    log.warn("TODO: Clean stuff up! --GM", .{});
+    self.context_initialised = false;
+
+    if (self.gl_context) |p| {
+        if (self.hDC) |hDC| {
+            if (self.hWnd != null) {
+                log.info("Detaching GL context", .{});
+                _ = windows.gdi32.wglMakeCurrent(hDC, null);
+            }
+        }
+        log.info("Disposing of GL context", .{});
+        _ = wglDeleteContext(p);
+        self.gl_context = null;
+    }
+
+    if (self.hDC) |hDC| {
+        if (self.hWnd) |hWnd| {
+            log.info("Disposing of device context", .{});
+            _ = windows.user32.ReleaseDC(hWnd, hDC);
+        }
+        self.hDC = null;
+    }
+
+    if (self.hWnd) |hWnd| {
+        log.info("Destroying window", .{});
+        windows.user32.destroyWindow(hWnd) catch |err| {
+            log.err("DestroyWindow failed: {!}", .{err});
+            // Squelch error anyway
+        };
+        self.hWnd = null;
+    }
+
+    self.hInstance = null;
     self.* = undefined;
 }
 
@@ -216,7 +247,7 @@ fn wndProcWrapped(self: *Self, hWnd: windows.HWND, uMsg: windows.UINT, wParam: w
                     return error.NotFound;
                 }
 
-                log.info("Just kidding, disusing and deleting the OpenGL context", .{});
+                log.info("Just kidding, detaching and deleting the OpenGL context", .{});
             }
 
             log.info("Creating the real OpenGL context", .{});
@@ -274,6 +305,21 @@ fn wndProcWrapped(self: *Self, hWnd: windows.HWND, uMsg: windows.UINT, wParam: w
         },
 
         windows.user32.WM_DESTROY => {
+            if (self.hWnd) |this_hWnd| {
+                if (self.gl_context != null) {
+                    if (self.hDC) |hDC| {
+                        log.info("Detaching GL context", .{});
+                        _ = windows.gdi32.wglMakeCurrent(hDC, null);
+                    }
+                }
+
+                if (self.hDC) |hDC| {
+                    log.info("Disposing of device context", .{});
+                    _ = windows.user32.ReleaseDC(this_hWnd, hDC);
+                    self.hDC = null;
+                }
+                self.hWnd = null;
+            }
             windows.user32.PostQuitMessage(0);
             return 0;
         },
