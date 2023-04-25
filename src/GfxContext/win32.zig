@@ -253,6 +253,11 @@ fn wndProcWrapped(self: *Self, hWnd: windows.HWND, uMsg: windows.UINT, wParam: w
             return 0;
         },
 
+        windows.user32.WM_DESTROY => {
+            windows.user32.PostQuitMessage(0);
+            return 0;
+        },
+
         else => return windows.user32.DefWindowProcW(hWnd, uMsg, wParam, lParam),
     }
 }
