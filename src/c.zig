@@ -79,9 +79,7 @@ pub usingnamespace if (builtin.target.isWasm()) struct {
         });
 
     pub usingnamespace if (builtin.target.os.tag == .windows)
-        struct {
-            pub extern fn wglGetProcAddress(unnamedParam1: [*:0]const u8) callconv(.C) ?*const fn () callconv(.C) void;
-        }
+        struct {}
     else
         struct {
             pub const everything = @cImport({

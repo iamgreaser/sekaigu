@@ -13,6 +13,14 @@ const StaticPoolChainedItem = static_pool.StaticPoolChainedItem;
 
 const http_types = @import("http_types.zig");
 
+// Import some Win32 bindings
+// FIXME: get this fixed in Zig --GM
+pub const winhelpers = if (builtin.target.os.tag == .windows) struct {
+    const WINAPI = std.os.windows.WINAPI;
+    pub extern fn recv(s: os.socket_t, buf: [*]u8, len: c_int, flags: c_int) callconv(WINAPI) c_int;
+    pub extern fn send(s: os.socket_t, buf: [*]const u8, len: c_int, flags: c_int) callconv(WINAPI) c_int;
+} else struct {};
+
 pub fn ClientState(comptime Parent: type) type {
     return struct {
         const Self = @This();
@@ -137,22 +145,34 @@ pub fn ClientState(comptime Parent: type) type {
 
         pub fn read(self: *Self, buf: []u8) !usize {
             // FIXME need to actually make the socket itself nonblocking as Win32 doesn't support MSG_DONTWAIT --GM
-            const recvlen = try os.recv(
-                self.sockfd.?,
-                buf,
-                if (builtin.target.os.tag == .windows) 0 else os.MSG.DONTWAIT,
-            );
-            return recvlen;
+            if (builtin.target.os.tag == .windows) {
+                return switch (winhelpers.recv(self.sockfd.?, buf.ptr, @intCast(c_int, buf.len), 0)) {
+                    os.windows.ws2_32.SOCKET_ERROR => switch (os.windows.ws2_32.WSAGetLastError()) {
+                        os.windows.ws2_32.WinsockError.WSAEWOULDBLOCK => error.WouldBlock,
+                        else => error.UnhandledWinsockError,
+                    },
+                    else => |v| @intCast(usize, v),
+                };
+            } else {
+                const recvlen = try os.recv(self.sockfd.?, buf, os.MSG.DONTWAIT);
+                return recvlen;
+            }
         }
 
         pub fn write(self: *Self, buf: []const u8) !usize {
             // FIXME need to actually make the socket itself nonblocking as Win32 doesn't support MSG_DONTWAIT --GM
-            const sentlen = try os.send(
-                self.sockfd.?,
-                buf,
-                if (builtin.target.os.tag == .windows) 0 else os.MSG.DONTWAIT,
-            );
-            return sentlen;
+            if (builtin.target.os.tag == .windows) {
+                return switch (winhelpers.send(self.sockfd.?, buf.ptr, @intCast(c_int, buf.len), 0)) {
+                    os.windows.ws2_32.SOCKET_ERROR => switch (os.windows.ws2_32.WSAGetLastError()) {
+                        os.windows.ws2_32.WinsockError.WSAEWOULDBLOCK => error.WouldBlock,
+                        else => error.UnhandledWinsockError,
+                    },
+                    else => |v| @intCast(usize, v),
+                };
+            } else {
+                const sentlen = try os.send(self.sockfd.?, buf, os.MSG.DONTWAIT);
+                return sentlen;
+            }
         }
 
         fn prepareResponse(self: *Self) !void {

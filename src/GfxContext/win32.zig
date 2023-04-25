@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const log = std.log.scoped(.gfx_context);
 const C = @import("../c.zig");
@@ -9,9 +10,13 @@ const LinearFifo = std.fifo.LinearFifo;
 
 const Self = @This();
 
+// helpers
+const WINAPI = windows.WINAPI;
+
 // missing function prototypes - TODO get these added into Zig --GM
-pub extern fn SetWindowTextW(hWnd: windows.HWND, lpString: [*:0]u16) callconv(.C) windows.BOOL;
-pub extern fn wglDeleteContext(unnamedParam1: ?windows.HGLRC) callconv(.C) windows.BOOL;
+pub extern fn SetWindowTextW(hWnd: windows.HWND, lpString: [*:0]u16) callconv(WINAPI) windows.BOOL;
+pub extern fn wglDeleteContext(unnamedParam1: ?windows.HGLRC) callconv(WINAPI) windows.BOOL;
+pub extern fn wglGetProcAddress(unnamedParam1: [*:0]const u8) callconv(WINAPI) ?*const fn () callconv(WINAPI) void;
 
 // extra WGL enums
 const WGL_CONTEXT_MAJOR_VERSION_ARB = 0x2091;
@@ -133,7 +138,7 @@ pub fn init(self: *Self) anyerror!void {
 
     // Load extensions
     log.info("Loading OpenGL extensions", .{});
-    try C.loadGlExtensions(@TypeOf(C.wglGetProcAddress), C.wglGetProcAddress);
+    try C.loadGlExtensions(@TypeOf(wglGetProcAddress), wglGetProcAddress);
 
     // Clean up any latent OpenGL error
     _ = C.glGetError();
@@ -144,7 +149,7 @@ pub fn free(self: *Self) void {
     self.* = undefined;
 }
 
-fn wndProc(hWnd: windows.HWND, uMsg: windows.UINT, wParam: windows.WPARAM, lParam: windows.LPARAM) callconv(.C) windows.LRESULT {
+fn wndProc(hWnd: windows.HWND, uMsg: windows.UINT, wParam: windows.WPARAM, lParam: windows.LPARAM) callconv(WINAPI) windows.LRESULT {
     var self: *Self = base_self.?;
     return self.wndProcWrapped(hWnd, uMsg, wParam, lParam) catch |err| {
         log.err("Error in wndProc: {!}", .{err});
@@ -205,7 +210,7 @@ fn wndProcWrapped(self: *Self, hWnd: windows.HWND, uMsg: windows.UINT, wParam: w
                 defer _ = windows.gdi32.wglMakeCurrent(self.hDC.?, null);
 
                 log.info("Fetching wglCreateContextAttribsARB", .{});
-                wglCreateContextAttribsARB = @ptrCast(@TypeOf(wglCreateContextAttribsARB), C.wglGetProcAddress("wglCreateContextAttribsARB"));
+                wglCreateContextAttribsARB = @ptrCast(@TypeOf(wglCreateContextAttribsARB), wglGetProcAddress("wglCreateContextAttribsARB"));
                 if (wglCreateContextAttribsARB == null) {
                     log.err("Could not fetch wglCreateContextAttribsARB", .{});
                     return error.NotFound;
