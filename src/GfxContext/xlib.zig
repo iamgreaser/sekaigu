@@ -63,6 +63,8 @@ width: u16 = 800,
 height: u16 = 600,
 x11_display: ?*C.Display = null,
 x11_window: ?C.Window = null,
+fbconfiglist_len: c_int = 0,
+fbconfiglist: ?[*]C.GLXFBConfig = null,
 glx_window: ?C.GLXWindow = null,
 glx_context: C.GLXContext = null,
 
@@ -165,8 +167,7 @@ pub fn init(self: *Self) anyerror!void {
     ));
 
     log.info("Fetching appropriate GLXFBContext", .{});
-    var fbconfiglist_len: c_int = 0;
-    var fbconfiglist: [*]C.GLXFBConfig = try notNull(?[*]C.GLXFBConfig, glXChooseFBConfig(
+    self.fbconfiglist = try notNull(?[*]C.GLXFBConfig, glXChooseFBConfig(
         self.x11_display.?,
         C.XScreenNumberOfScreen(C.XDefaultScreenOfDisplay(self.x11_display.?)),
         &[_:0]c_int{
@@ -178,15 +179,14 @@ pub fn init(self: *Self) anyerror!void {
             GLX_STENCIL_SIZE, 8,
             GLX_DOUBLEBUFFER, C.True,
         },
-        &fbconfiglist_len,
+        &self.fbconfiglist_len,
     ));
-    log.debug("GLXFBContext count: {d}", .{fbconfiglist_len});
-    defer _ = C.XFree(@ptrCast(?*anyopaque, fbconfiglist)); // Apparently, *?*thing is not ?*anyopaque. So the cast is needed.
+    log.debug("GLXFBContext count: {d}", .{self.fbconfiglist_len});
 
     log.info("Creating GLX window state", .{});
     self.glx_window = try notNull(C.GLXWindow, glXCreateWindow(
         self.x11_display.?,
-        fbconfiglist[0],
+        self.fbconfiglist.?[0],
         self.x11_window.?,
         &[_:0]c_int{},
     ));
@@ -194,7 +194,7 @@ pub fn init(self: *Self) anyerror!void {
     log.info("Creating GL context", .{});
     self.glx_context = try notNull(C.GLXContext, glXCreateContextAttribsARB(
         self.x11_display.?,
-        fbconfiglist[0],
+        self.fbconfiglist.?[0],
         null,
         C.True,
         &[_:0]c_int{
@@ -231,7 +231,7 @@ pub fn init(self: *Self) anyerror!void {
     _ = C.XSelectInput(
         self.x11_display.?,
         self.x11_window.?,
-        C.KeyPressMask | C.KeyReleaseMask,
+        C.KeyPressMask | C.KeyReleaseMask | C.StructureNotifyMask,
     );
 
     log.info("Showing window", .{});
@@ -265,6 +265,13 @@ pub fn free(self: *Self) void {
         log.info("Disposing of GLX window", .{});
         glXDestroyWindow(self.x11_display.?, p);
         self.glx_window = null;
+    }
+
+    if (self.fbconfiglist) |p| {
+        log.info("Disposing of GLXFBConfig list", .{});
+        _ = C.XFree(@ptrCast(?*anyopaque, p)); // Apparently, *?*thing is not ?*anyopaque. So the cast is needed.
+        self.fbconfiglist = null;
+        self.fbconfiglist_len = 0;
     }
 
     if (self.x11_window) |p| {
@@ -317,7 +324,8 @@ pub fn applyEvents(self: *Self, comptime TKeys: type, keys: *TKeys) anyerror!boo
                 const keysym = C.XLookupKeysym(&ev.xkey, 0);
                 // TODO: Handle keysym == NoSymbol (also required for IMEs!) --GM
 
-                log.debug("XEv Key {s} {X:0>8}", .{
+                log.debug("XEv Key {X:0>8} {s} {X:0>8}", .{
+                    ev.xkey.window,
                     if (state) "1" else "0",
                     keysym,
                 });
@@ -338,18 +346,29 @@ pub fn applyEvents(self: *Self, comptime TKeys: type, keys: *TKeys) anyerror!boo
                     }).* = state;
                 }
             },
+
+            C.ConfigureNotify => {
+                const cn = &ev.xconfigure;
+                log.debug("XEv ConfigureNotify {X:0>8} {d} {d}", .{ cn.window, cn.width, cn.height });
+                if (cn.window == self.x11_window.?) {
+                    try self.handleResize(cn.width, cn.height);
+                }
+            },
+
             C.ClientMessage => {
-                log.debug("XEv {any} Client {any}", .{ ev.type, ev.xclient });
+                log.debug("XEv Client {any}", .{ev.xclient});
                 if (ev.xclient.data.l[0] == self.atoms.WM_DELETE_WINDOW) {
                     log.info("WM_DELETE_WINDOW received, shutting down", .{});
                     return true;
                 }
             },
+
             else => {
                 log.debug("XEv {any} {any}", .{ ev.type, ev });
             },
         }
     }
+
     return false;
 }
 
