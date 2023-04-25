@@ -98,7 +98,6 @@ const OUR_WNDCLASS = &[_:0]u16{ 's', 'e', 'k', 'a', 'i', 'g', 'u', '_', 'm', 'a'
 pub fn init(self: *Self) anyerror!void {
     errdefer self.free();
     base_self = self;
-    errdefer base_self = null;
     log.info("Initialising Win32", .{});
 
     log.info("Getting hInstance", .{});
@@ -141,12 +140,6 @@ pub fn init(self: *Self) anyerror!void {
         return error.Failed;
     };
 
-    log.info("Setting window title", .{});
-    try self.setTitle("sekaigu pre-alpha");
-
-    log.info("Showing window", .{});
-    _ = windows.user32.showWindow(self.hWnd.?, windows.user32.SW_SHOWNORMAL);
-
     // Pump event queue until we're initialised
     while (!self.context_initialised) {
         var msg: windows.user32.MSG = undefined;
@@ -158,6 +151,12 @@ pub fn init(self: *Self) anyerror!void {
         _ = windows.user32.TranslateMessage(&msg);
         _ = windows.user32.DispatchMessageW(&msg);
     }
+
+    log.info("Setting window title", .{});
+    try self.setTitle("sekaigu pre-alpha");
+
+    log.info("Showing window", .{});
+    _ = windows.user32.showWindow(self.hWnd.?, windows.user32.SW_SHOWNORMAL);
 
     // Load extensions
     log.info("Loading OpenGL extensions", .{});
@@ -177,14 +176,14 @@ pub fn free(self: *Self) void {
                 _ = windows.gdi32.wglMakeCurrent(hDC, null);
             }
         }
-        log.info("Disposing of GL context", .{});
+        log.info("Destroying GL context", .{});
         _ = wglDeleteContext(p);
         self.gl_context = null;
     }
 
     if (self.hDC) |hDC| {
         if (self.hWnd) |hWnd| {
-            log.info("Disposing of device context", .{});
+            log.info("Destroying device context", .{});
             _ = windows.user32.ReleaseDC(hWnd, hDC);
         }
         self.hDC = null;
@@ -200,11 +199,13 @@ pub fn free(self: *Self) void {
     }
 
     self.hInstance = null;
+    base_self = null;
     self.* = undefined;
 }
 
 fn wndProc(hWnd: windows.HWND, uMsg: windows.UINT, wParam: windows.WPARAM, lParam: windows.LPARAM) callconv(WINAPI) windows.LRESULT {
     var self: *Self = base_self.?;
+    //log.debug("wndproc {X:0>16} {X:0>16} {X:0>16} {X:0>16}", .{ @ptrToInt(hWnd), uMsg, wParam, lParam });
     return self.wndProcWrapped(hWnd, uMsg, wParam, lParam) catch |err| {
         log.err("Error in wndProc: {!}", .{err});
         // TODO: Work out how to pass this down the chain --GM
@@ -246,6 +247,12 @@ fn wndProcWrapped(self: *Self, hWnd: windows.HWND, uMsg: windows.UINT, wParam: w
 
             log.info("Getting device context", .{});
             self.hDC = windows.user32.GetDC(hWnd) orelse return error.DCNotFound;
+            errdefer ({
+                log.info("Destroying device context", .{});
+                _ = windows.user32.ReleaseDC(hWnd, self.hDC.?);
+                self.hDC = null;
+                log.info("OK Destroying device context", .{});
+            });
 
             log.info("Choosing pixel format", .{});
             const pfidx = windows.gdi32.ChoosePixelFormat(self.hDC.?, &pfd);
@@ -257,11 +264,19 @@ fn wndProcWrapped(self: *Self, hWnd: windows.HWND, uMsg: windows.UINT, wParam: w
             log.info("Creating OpenGL context", .{});
             var crap_context: windows.HGLRC = windows.gdi32.wglCreateContext(self.hDC.?) orelse return error.GLContextCreationFailed;
             {
-                defer _ = wglDeleteContext(crap_context);
+                defer ({
+                    log.info("Destroying temporary GL context", .{});
+                    _ = wglDeleteContext(crap_context);
+                    log.info("OK Destroying temporary GL context", .{});
+                });
 
                 log.info("Making OpenGL context current", .{});
                 if (!windows.gdi32.wglMakeCurrent(self.hDC.?, crap_context)) return error.GLContextUseFailed;
-                defer _ = windows.gdi32.wglMakeCurrent(self.hDC.?, null);
+                defer ({
+                    log.info("Detaching GL context", .{});
+                    _ = windows.gdi32.wglMakeCurrent(self.hDC.?, null);
+                    log.info("OK Detaching GL context", .{});
+                });
 
                 log.info("Fetching wglCreateContextAttribsARB", .{});
                 wglCreateContextAttribsARB = @ptrCast(@TypeOf(wglCreateContextAttribsARB), wglGetProcAddress("wglCreateContextAttribsARB"));
@@ -328,6 +343,7 @@ fn wndProcWrapped(self: *Self, hWnd: windows.HWND, uMsg: windows.UINT, wParam: w
         },
 
         windows.user32.WM_DESTROY => {
+            log.debug("destroy", .{});
             if (self.hWnd) |this_hWnd| {
                 if (self.gl_context != null) {
                     if (self.hDC) |hDC| {
@@ -337,7 +353,7 @@ fn wndProcWrapped(self: *Self, hWnd: windows.HWND, uMsg: windows.UINT, wParam: w
                 }
 
                 if (self.hDC) |hDC| {
-                    log.info("Disposing of device context", .{});
+                    log.info("Destroying device context", .{});
                     _ = windows.user32.ReleaseDC(this_hWnd, hDC);
                     self.hDC = null;
                 }
