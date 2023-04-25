@@ -5,6 +5,8 @@ const gl = @import("../gl.zig");
 
 const windows = std.os.windows;
 
+const LinearFifo = std.fifo.LinearFifo;
+
 const Self = @This();
 
 // missing function prototypes - TODO get these added into Zig --GM
@@ -30,6 +32,9 @@ const WGL_CONTEXT_ES2_PROFILE_BIT_EXT = 0x00000004;
 const ERROR_INVALID_VERSION_ARB = 0x2095;
 const ERROR_INVALID_PROFILE_ARB = 0x2096;
 
+const KeyEvent = struct { vkey: u16, state: bool };
+const KeyFifoType = LinearFifo(KeyEvent, .{ .Static = 1024 });
+
 // variables
 var base_self: ?*Self = null;
 var wglCreateContextAttribsARB: ?*const fn (hDC: windows.HDC, hShareContext: ?windows.HGLRC, attribList: [*:0]const c_int) callconv(.C) ?windows.HGLRC = null;
@@ -43,12 +48,22 @@ context_initialised: bool = false,
 width: u16 = 800,
 height: u16 = 600,
 
+key_fifo: KeyFifoType = KeyFifoType.init(),
+
 // methods
 pub fn new() anyerror!Self {
     return Self{};
 }
 
 // TODO: Get these constants added into Zig --GM
+const VK = struct {
+    pub const SPACE = 0x20;
+    pub const LEFT = 0x25;
+    pub const UP = 0x26;
+    pub const RIGHT = 0x27;
+    pub const DOWN = 0x28;
+};
+
 const PFD_TYPE_RGBA = 0;
 
 const PFD_DOUBLEBUFFER = (1 << 0);
@@ -258,6 +273,14 @@ fn wndProcWrapped(self: *Self, hWnd: windows.HWND, uMsg: windows.UINT, wParam: w
             return 0;
         },
 
+        windows.user32.WM_KEYDOWN, windows.user32.WM_KEYUP => {
+            const state = (uMsg == windows.user32.WM_KEYDOWN);
+            const vkey: u16 = @intCast(u16, wParam);
+            log.debug("Key W {s} {X:0>4}", .{ if (state) "1" else "0", vkey });
+            try self.key_fifo.writeItem(.{ .vkey = vkey, .state = state });
+            return 0;
+        },
+
         else => return windows.user32.DefWindowProcW(hWnd, uMsg, wParam, lParam),
     }
 }
@@ -290,8 +313,24 @@ pub fn handleResize(self: *Self, width: i32, height: i32) !void {
 }
 
 pub fn applyEvents(self: *Self, comptime TKeys: type, keys: *TKeys) anyerror!bool {
-    _ = self;
-    _ = keys;
+    while (self.key_fifo.readItem()) |k| {
+        log.debug("Key R {s} {X:0>4}", .{ if (k.state) "1" else "0", k.vkey });
+        noPress: {
+            (switch (k.vkey) {
+                'W' => &keys.w,
+                'A' => &keys.a,
+                'S' => &keys.s,
+                'D' => &keys.d,
+                'C' => &keys.c,
+                VK.SPACE => &keys.SPACE,
+                VK.LEFT => &keys.LEFT,
+                VK.RIGHT => &keys.RIGHT,
+                VK.UP => &keys.UP,
+                VK.DOWN => &keys.DOWN,
+                else => break :noPress,
+            }).* = k.state;
+        }
+    }
     return false;
 }
 
