@@ -65,7 +65,6 @@ hInstance: ?windows.HINSTANCE = null,
 hWnd: ?windows.HWND = null,
 hDC: ?windows.HDC = null,
 gl_context: ?windows.HGLRC = null,
-context_initialised: bool = false,
 width: u16 = 800,
 height: u16 = 600,
 
@@ -120,6 +119,13 @@ pub fn init(self: *Self) anyerror!void {
         return error.Failed;
     }
 
+    // CreateWindow(|Ex)(W|A) sends WM_CREATE immediately.
+    // That is, there's no need to run GetMessage(W|A)/TranslateMessage/DispatchMessage(W|A) ourselves.
+    //
+    // Our WndProc's response to the message will either be:
+    // *  0: The window was created successfully.
+    // * -1: Something failed, and we want CreateWindow(|Ex)(W|A) to return NULL.
+    //
     log.info("Creating window", .{});
     self.hWnd = CreateWindowExW(
         0,
@@ -140,18 +146,6 @@ pub fn init(self: *Self) anyerror!void {
         return error.Failed;
     };
 
-    // Pump event queue until we're initialised
-    while (!self.context_initialised) {
-        var msg: windows.user32.MSG = undefined;
-        const status = std.os.windows.user32.GetMessageW(&msg, null, 0, 0);
-        if (status <= 0) {
-            // Either we got an error or a WM_QUIT. Bail out with failure.
-            return error.FailedToInitialiseContext;
-        }
-        _ = windows.user32.TranslateMessage(&msg);
-        _ = windows.user32.DispatchMessageW(&msg);
-    }
-
     log.info("Setting window title", .{});
     try self.setTitle("sekaigu pre-alpha");
 
@@ -167,8 +161,6 @@ pub fn init(self: *Self) anyerror!void {
 }
 
 pub fn free(self: *Self) void {
-    self.context_initialised = false;
-
     if (self.gl_context) |p| {
         if (self.hDC) |hDC| {
             if (self.hWnd != null) {
@@ -209,8 +201,16 @@ fn wndProc(hWnd: windows.HWND, uMsg: windows.UINT, wParam: windows.WPARAM, lPara
     return self.wndProcWrapped(hWnd, uMsg, wParam, lParam) catch |err| {
         log.err("Error in wndProc: {!}", .{err});
         // TODO: Work out how to pass this down the chain --GM
-        windows.user32.postQuitMessage(1);
-        return 0;
+        switch (uMsg) {
+            // This is sent directly from CreateWindow(|Ex)(W|A).
+            // If we return -1, then the window is destroyed and CreateWindow(|Ex)(W|A) returns NULL.
+            windows.user32.WM_CREATE => return -1,
+
+            else => {
+                windows.user32.postQuitMessage(1);
+                return 0;
+            },
+        }
     };
 }
 
@@ -330,7 +330,6 @@ fn wndProcWrapped(self: *Self, hWnd: windows.HWND, uMsg: windows.UINT, wParam: w
             log.info("Making OpenGL context current", .{});
             if (!windows.gdi32.wglMakeCurrent(self.hDC.?, self.gl_context.?)) return error.GLContextUseFailed;
 
-            self.context_initialised = true;
             return 0;
         },
 
