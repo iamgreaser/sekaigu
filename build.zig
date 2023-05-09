@@ -43,7 +43,7 @@ pub fn build(b: *Build) void {
     );
     wasmExe.addModule("font_raw_bin", fontRawMod);
     wasmExe.addModule("font_map_bin", fontMapMod);
-    wasmExe.install();
+    b.installArtifact(wasmExe);
     const wasmMod = b.createModule(.{
         .source_file = wasmExe.getOutputSource(),
     });
@@ -53,9 +53,9 @@ pub fn build(b: *Build) void {
     exe.addModule("sekaigu_wasm_bin", wasmMod);
     exe.addModule("font_raw_bin", fontRawMod);
     exe.addModule("font_map_bin", fontMapMod);
-    exe.install();
+    b.installArtifact(exe);
 
-    const run_cmd = exe.run();
+    const run_cmd = b.addRunArtifact(exe);
 
     run_cmd.step.dependOn(b.getInstallStep());
 

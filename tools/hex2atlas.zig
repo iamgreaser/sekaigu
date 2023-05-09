@@ -95,12 +95,12 @@ pub fn main() !void {
     // Give this some extra space for overflow
     atlas_data = try allocator.alloc(u8, atlas_pitch * atlas_height * atlas_layers + 4);
     defer allocator.free(atlas_data);
-    std.mem.set(u8, atlas_data, 0);
+    @memset(atlas_data, 0);
     log.info("Allocated size: {d} bytes x2", .{atlas_data.len});
 
     atlas_xspan_heads = try allocator.alloc(?*XSpan, atlas_height * atlas_layers);
     defer allocator.free(atlas_xspan_heads);
-    std.mem.set(?*XSpan, atlas_xspan_heads, null);
+    @memset(atlas_xspan_heads, null);
     defer destroyXSpanChains(allocator);
     for (atlas_xspan_heads) |*xspanptr| {
         var firstspan = try allocator.create(XSpan);
@@ -170,7 +170,7 @@ pub fn main() !void {
         defer file.close();
         var block = try allocator.alloc(u8, atlas_width * 2);
         defer allocator.free(block);
-        std.mem.set(u8, block, 0);
+        @memset(block, 0);
 
         const raw_writer = file.writer();
         var buffered_writer_state = std.io.BufferedWriter(BUFSIZE, @TypeOf(raw_writer)){
