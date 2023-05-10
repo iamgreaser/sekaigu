@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // BASIC TERMINOLOGY:
 // - Face: A potentially infinite plane, consisting of a surface normal direction and an offset from the origin (position 0,0,0).

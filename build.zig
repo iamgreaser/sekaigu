@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 const builtin = @import("builtin");
 const std = @import("std");
 const Build = std.Build;

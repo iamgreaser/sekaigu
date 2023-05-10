@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 const target = @import("builtin").target;
 
 pub const GLboolean = if (target.isWasm()) bool else u8;

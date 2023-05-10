@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 const linalg = @import("../linalg.zig");
 const Vec2f = linalg.Vec2f;
 const Vec3f = linalg.Vec3f;

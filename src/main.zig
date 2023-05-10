@@ -1,7 +1,27 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+const LICENCE_TEXT =
+    \\sekaigu (世界具): A world-building tool
+    \\Copyright (C) 2023, sekaigu contributors
+    \\
+    \\This program is free software: you can redistribute it and/or modify
+    \\it under the terms of the GNU Affero General Public License as published by
+    \\the Free Software Foundation, either version 3 of the License, or
+    \\(at your option) any later version.
+    \\
+    \\This program is distributed in the hope that it will be useful,
+    \\but WITHOUT ANY WARRANTY; without even the implied warranty of
+    \\MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    \\GNU Affero General Public License for more details.
+    \\
+    \\You should have received a copy of the GNU Affero General Public License
+    \\along with this program.  If not, see <https://www.gnu.org/licenses/>.
+;
+
 const builtin = @import("builtin");
 const std = @import("std");
 const log = std.log.scoped(.main);
 const time = std.time;
+const mem = std.mem;
 const Allocator = std.mem.Allocator;
 const C = @import("c.zig");
 
@@ -271,6 +291,14 @@ var frame_time_accum: i64 = 0;
 var fps_time_accum: u64 = 0;
 var fps_counter: u64 = 0;
 pub fn init() !void {
+    // Print the licensing information!
+    {
+        var iter = mem.split(u8, LICENCE_TEXT, "\n");
+        while (iter.next()) |line| {
+            log.warn("{s}", .{line});
+        }
+    }
+
     // Create a graphics context
     gfx = try GfxContext.new();
     try gfx.init();
@@ -548,9 +576,9 @@ fn tickPlayer(dt: f32, p: *Player) !void {
         0.0,
     })).mul(3.141593); // 180 deg per second
 
-    if (!std.mem.eql(f32, &state.dpos.a, &dpos.a))
+    if (!mem.eql(f32, &state.dpos.a, &dpos.a))
         try p.handleEvent(Player.Events.SetDPos, .{dpos});
-    if (!std.mem.eql(f32, &state.drot.a, &drot.a))
+    if (!mem.eql(f32, &state.drot.a, &drot.a))
         try p.handleEvent(Player.Events.SetDRot, .{drot});
 }
 

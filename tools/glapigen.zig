@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 pub const std = @import("std");
 pub const log = std.log.scoped(.main);
 

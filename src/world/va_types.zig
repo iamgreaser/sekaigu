@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 pub const VA_P4HF_T2F_C3F_N3F = struct {
     pos: [4]f32,
     tex0: [2]f32,

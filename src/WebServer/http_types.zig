@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 const std = @import("std");
 const log = std.log.scoped(.webserver_types);
 const http = std.http;

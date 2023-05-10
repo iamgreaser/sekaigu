@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 const builtin = @import("builtin");
 
 pub usingnamespace if (builtin.target.isWasm()) struct {
