@@ -13,8 +13,8 @@ It can probably be obtained from here:
   * minisig: https://ziglang.org/builds/zig-linux-x86_64-0.11.0-dev.3006+ff59c4584.tar.xz.minisig
   * SHA256: 145d5b66fa367277a10c25fb90a343a5fc157ab163503b349f4923e5301f5d82
 * Windows, x86 64-bit: https://ziglang.org/builds/zig-windows-x86_64-0.11.0-dev.3006+ff59c4584.zip
-  * minisig: https://ziglang.org/builds/zig-windows-x86_64-0.11.0-dev.3006+ff59c4584.zip
   * Size: 77508416 bytes
+  * minisig: https://ziglang.org/builds/zig-windows-x86_64-0.11.0-dev.3006+ff59c4584.zip.minisig
   * SHA256: c875a018467540cc0e75db44da2ac09b46d6997d695871e2cb20aa74a45a191a
 
 Latest nightlies can be found here, including a few 32-bit builds: https://ziglang.org/download/
