@@ -27,10 +27,10 @@ Tasks:
     - [x] Zig v(whatever we're using at the time): MIT
       - [x] Bundle licences
       - [x] Indicate which version we're using
-    - [ ] Khronos OpenGL XML: Apache 2.0
+    - [x] Khronos OpenGL XML: Apache 2.0
       - [x] Read through it
       - [x] Bundle licences
-      - [ ] Indicate which version we're using
+      - [x] Indicate which version we're using
 
 - [ ] Update documentation
   - [ ] README.md
