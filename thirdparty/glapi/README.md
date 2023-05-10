@@ -1,6 +1,6 @@
 The XML files are from the `xml/` directory in the Khronos OpenGL-Registry repository.
-The canonical URL for the repository is here: <https://github.com/KhronosGroup/OpenGL-Registry>
 These files are licensed under the Apache 2.0 licence, as indicated in each XML file.
+The canonical URL for the repository is here: <https://github.com/KhronosGroup/OpenGL-Registry>
 
 Relevant commit used (MAINTAINERS: ALWAYS UPDATE THIS INFORMATION IF YOU NEED A LATER VERSION --GM):
 
