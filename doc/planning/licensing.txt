@@ -1,0 +1,93 @@
+2023-05-10T02:34+00:00
+Author: GreaseMonkey
+Overall status: Requirements decided, now in progress
+
+We need a licence if we're actually going to release stuff.
+
+----
+
+Tasks:
+
+- [ ] Sort out licences:
+  - [ ] Main engine licence: AGPLv3
+    - [x] Read through it
+    - [ ] Update source files
+    - [x] Bundle licences
+  - [x] VM code + asset licence: CC0 (w/ an exception that GNU Unifont will be under SIL OFL v1.1)
+    - [x] Update source files
+      - We have none right now.
+    - [x] Bundle licences
+  - [ ] Dependency licences:
+    - [ ] GNU Unifont v15.0.1: SIL OFL v1.1
+      - [ ] Read through it
+      - [ ] Recreate the modifications I did some time ago, but in source code form (I combined some stuff together)
+      - [x] Choose a different name for the font as required by the SIL OFL v1.1: "sekaigu yunifon"
+      - [x] Bundle licences
+    - [ ] Zig v(whatever we're using at the time): MIT
+      - [x] Bundle licences
+    - [ ] Khronos OpenGL XML: Apache 2.0
+      - [ ] Read through it
+      - [x] Bundle licences
+
+- [ ] Update documentation
+  - [ ] README.md
+  - [ ] COPYING
+
+----
+
+Requirements:
+
+There are three different things to cover here:
+- The main engine
+- VM code and assets which run inside the engine
+- Any dependencies, of which we MUST remain compatible with if we are to use them
+
+The main engine MUST be released under a sufficient copyleft as to require all modifications to I guess a "client" build of this to have its source code released in such a way that it can be built and run by pretty much anyone, including both Linux users and Windows users.
+
+The VM code and assets SHOULD be easy for someone to utilise with ease. For this I'd consider a really permissive licence. Quite possibly one of the "public domain even when your country's laws suck" licences.
+
+As far as dependencies, these are currently:
+- GNU Unifont, a bitmapped font, dual-licensed: One of these is GPLv2+, the other is SIL OFL v1.1. If we ever depend on the software, that's GPLv2+, and if we ever depend on the documentation, that's GFDLv1.3, and there's also a couple of font files (the "jiskan" stuff) which are in the public domain.
+- Zig, the programming language and implementation we're using: MIT.
+- The Khronos OpenGL repository XML spec: Apache 2.0.
+- Some things we dynamically link against, where the licences are probably not going to be a problem:
+  - The Win32 API (Windows only)
+  - Xlib (X11 targets only)
+  - Some implementation of OpenGL ES 2.0 (OpenGL 4.1 can be used as a fallback)
+  - A polyfill for WebAssembly may be something we need in future
+
+----
+
+The VM-hosted code and assets are likely to be CC0, and the stuff we depend on will be what they are. The real head scratcher is the engine.
+
+AGPLv3 is still a candidate - Android users will have to either sideload or install f-droid, while iOS users will have to either use the web version, or wait until Apple graces them with the exclusive and highly generous privilege of letting people run their own stuff or to use third-party app stores within their precise geographic location. (Oh, also Android users can still use the web version.)
+
+However, as a counterpoint, it's probably not going to actually give us more protection of the engine source code availability and usability versus GPLv3. If a butt^H^H^H^H **cloud** service provider can do Service as a Software Substitute for AGPLv3 software, they'll be able to do it for sekaigu, too.
+
+...well, to an extent, and if they actually go ahead and do that then 1. they're going to need to keep stuff up to date and 2. it should help relieve pressure on what I anticipate to be a mesh network. I don't see The Cloud being a major threat here... and quite frankly, profit is not one of my goals at all.
+
+Besides, a server host which wishes to conceal their Special Sauce can just do it as part of an API to a separate service. For AGPLv3, they'd still have to release the source code as they will have modified it. Well, maybe. If we do stuff right, they may not actually need to modify it at all. So, what you'd get is some code to interface a proprietary API and none of the actual Special Sauce.
+
+A threat I cannot fully guard against without going with a custom licence is someone releasing an open-source build which requires a bunch of Windows-specific crap. Of course, someone doing that is probably going to be shooting themselves in the foot, as that would also mean that the web build wouldn't work.
+
+A weak copyleft would still require that any modifications to the engine be made available.
+
+Here are the licences I'm considering:
+
+- AGPLv3+
+- GPLv3+
+- GPLv2+
+- LGPLv3+
+- MPLv2.0
+
+Part of me wants to do something that isn't GPL as it tends to read less like a licence and more like a religious screed, but part of me wants to do it because it makes the sorts of companies that make me vomit, vomit.
+
+And actually, GPLv3 is probably a good candidate for the engine, provided that it doesn't affect the code that runs within it.
+
+... after some consideration, I'm now reading through the AGPLv3 licence to ensure that it at least seems it'll work.
+
+... I actually read the licence. Go me.
+
+Section 5, "Conveying Modified Source Versions" will need thorough reading, as it does have some rather funky requirements and probably comes from an era where version control wasn't as pervasive as it is today.
+
+We're going to want to have some automation for official and unofficial build information and all that jazz.
