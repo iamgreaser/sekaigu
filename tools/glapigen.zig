@@ -34,7 +34,7 @@ pub fn main() !void {
             apigen.deinit();
         });
 
-        try parseKhronosXML(allocator, &apigen, "indat/glapi/gl.xml");
+        try parseKhronosXML(allocator, &apigen, "thirdparty/glapi/gl.xml");
 
         {
             var base_writer = io.getStdOut().writer();

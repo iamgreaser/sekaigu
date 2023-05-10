@@ -29,7 +29,7 @@ pub fn build(b: *Build) void {
     runHex2Atlas.addArg("1024"); // Height
     runHex2Atlas.addArg("12"); // Layers
     runHex2Atlas.addFileSourceArg(FileSource.relative(
-        "indat/unifont/unifont-jp-with-upper-15.0.01.hex",
+        "thirdparty/unifont/unifont-jp-with-upper-15.0.01.hex",
     ));
     var fontRawMod = b.createModule(.{ .source_file = fontRaw });
     var fontMapMod = b.createModule(.{ .source_file = fontMap });
