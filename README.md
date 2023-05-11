@@ -2,7 +2,9 @@ WARNING: CURRENTLY SORTING OUT LICENCE CONFORMANCE AND STUFF AND THIS README IS 
 
 sekaigu (世界具): A world-building tool
 
-Copyright © 2023 sekaigu contributors. Licensed under various licences, please see COPYING for more information - in short, the engine is licensed under AGPLv3, the font is a modified GNU Unifont licensed under SIL OFL v1.1, other stuff that runs within the engine is CC0 - exactly what's what will be explicitly marked in each source file.
+Copyright © 2023 sekaigu contributors. Licensed under various licences, please see COPYING for more information.
+
+In short, the engine is licensed under AGPLv3, the font is a modified GNU Unifont 15.0.01 (under the name "sekaigu yunifon JP 15.0.01.0") licensed under SIL OFL v1.1, other stuff that runs within the engine is CC0 - exactly what's what will be explicitly marked in each source file.
 
 Current target version of Zig is 0.11.0-dev.3006+ff59c4584 .
 

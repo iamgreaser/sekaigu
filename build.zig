@@ -10,6 +10,24 @@ pub fn build(b: *Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Generate modified Unifont 15.0.01 as "sekaigu yunifon JP 15.0.01.0"
+    var exeYunifonGen = b.addExecutable(.{
+        .name = "yunifongen",
+        .root_source_file = FileSource.relative("tools/yunifongen.zig"),
+        // The target MUST be native, as we're gonna run this.
+        .target = std.zig.CrossTarget.fromTarget(builtin.target),
+        // Debug builds run fast enough and also build quickly.
+        .optimize = .Debug,
+    });
+    var runYunifonGen = b.addRunArtifact(exeYunifonGen);
+    var fontHex = runYunifonGen.addOutputFileArg("sekaigu_yunifon_jp-15.0.01.0.hex");
+    runYunifonGen.addFileSourceArg(FileSource.relative(
+        "thirdparty/unifont/unifont_jp-15.0.01.hex",
+    ));
+    runYunifonGen.addFileSourceArg(FileSource.relative(
+        "thirdparty/unifont/unifont_upper-15.0.01.hex",
+    ));
+
     // Generate font atlas
     var exeHex2Atlas = b.addExecutable(.{
         .name = "hex2atlas",
@@ -28,9 +46,7 @@ pub fn build(b: *Build) void {
     runHex2Atlas.addArg("1024"); // Width
     runHex2Atlas.addArg("1024"); // Height
     runHex2Atlas.addArg("12"); // Layers
-    runHex2Atlas.addFileSourceArg(FileSource.relative(
-        "thirdparty/unifont/unifont-jp-with-upper-15.0.01.hex",
-    ));
+    runHex2Atlas.addFileSourceArg(fontHex);
     var fontRawMod = b.createModule(.{ .source_file = fontRaw });
     var fontMapMod = b.createModule(.{ .source_file = fontMap });
 

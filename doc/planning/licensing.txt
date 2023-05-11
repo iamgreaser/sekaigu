@@ -1,6 +1,6 @@
 2023-05-10T02:34+00:00
 Author: GreaseMonkey
-Overall status: Requirements decided, now in progress
+Overall status: DONE aside from one thing I don't know how to do so I've left it as a FIXME in COPYING (that is, I don't know how to attribute GNU Unifont properly)
 
 We need a licence if we're actually going to release stuff.
 
@@ -8,7 +8,7 @@ We need a licence if we're actually going to release stuff.
 
 Tasks:
 
-- [ ] Sort out licences:
+- [x] Sort out licences:
   - [x] Main engine licence: AGPLv3
     - [x] Read through it
     - [x] Update source files
@@ -17,13 +17,13 @@ Tasks:
     - [x] Update source files
       - We have none right now.
     - [x] Bundle licences
-  - [ ] Dependency licences:
-    - [ ] GNU Unifont v15.0.1: SIL OFL v1.1
-      - [ ] Read through it
-      - [ ] Recreate the modifications I did some time ago, but in source code form (I combined some stuff together)
+  - [x] Dependency licences:
+    - [x] GNU Unifont v15.0.1: SIL OFL v1.1
+      - [x] Read through it
+      - [x] Recreate the modifications I did some time ago, but in source code form (I combined some stuff together)
       - [x] Choose a different name for the font as required by the SIL OFL v1.1: "sekaigu yunifon"
       - [x] Bundle licences
-      - [ ] Indicate which version we're using
+      - [x] Indicate which version we're using
     - [x] Zig v(whatever we're using at the time): MIT
       - [x] Bundle licences
       - [x] Indicate which version we're using
@@ -32,9 +32,9 @@ Tasks:
       - [x] Bundle licences
       - [x] Indicate which version we're using
 
-- [ ] Update documentation
-  - [ ] README.md
-  - [ ] COPYING
+- [x] Update documentation
+  - [x] README.md
+  - [x] COPYING
 
 ----
 
